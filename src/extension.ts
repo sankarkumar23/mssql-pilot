@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import { log } from './utils/outputChannel';
+import { log, describeError } from './utils/outputChannel';
 import { clearMssqlApiCache } from './utils/mssqlApi';
+import { isFeatureEnabled } from './utils/config';
+import { ensureMssqlErrorCheckingDisabled, ensureMssqlSuggestionsDisabled } from './utils/mssqlSettings';
 import { registerSyncTriggers } from './cache/syncScheduler';
 import { registerCompletionProvider } from './completion/completionProvider';
 import { resyncCurrentDatabase, resyncAll } from './commands/resync';
@@ -9,6 +11,15 @@ import { showCacheStatus } from './commands/showCacheStatus';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('MSSQL Pilot activated');
+
+  if (isFeatureEnabled()) {
+    ensureMssqlErrorCheckingDisabled(context).catch((err) =>
+      log(`[settings] failed to disable mssql error checking (non-fatal): ${describeError(err)}`)
+    );
+    ensureMssqlSuggestionsDisabled(context).catch((err) =>
+      log(`[settings] failed to disable mssql suggestions (non-fatal): ${describeError(err)}`)
+    );
+  }
 
   context.subscriptions.push(registerSyncTriggers(context));
   context.subscriptions.push(registerCompletionProvider(context));
