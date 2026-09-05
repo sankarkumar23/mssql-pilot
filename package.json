@@ -1,0 +1,141 @@
+{
+  "name": "mssql-pilot",
+  "displayName": "MSSQL Pilot",
+  "description": "Fast, persistent schema autocomplete for the mssql extension — instant IntelliSense for databases with thousands of tables, views, and stored procedures, even right after reconnecting.",
+  "version": "0.1.0",
+  "publisher": "erexer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erexer/mssql-pilot"
+  },
+  "license": "MIT",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "mssql",
+    "sql",
+    "sql server",
+    "intellisense",
+    "autocomplete",
+    "cache"
+  ],
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "ms-mssql.mssql"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "mssql-pilot.resyncCurrentDatabase",
+        "title": "Resync Schema Cache (Current Database)",
+        "category": "MSSQL Pilot"
+      },
+      {
+        "command": "mssql-pilot.resyncAll",
+        "title": "Resync Schema Cache (All Cached Databases)",
+        "category": "MSSQL Pilot"
+      },
+      {
+        "command": "mssql-pilot.clearCacheCurrentDatabase",
+        "title": "Clear Schema Cache (Current Database)",
+        "category": "MSSQL Pilot"
+      },
+      {
+        "command": "mssql-pilot.clearCacheAll",
+        "title": "Clear Schema Cache (All Databases)",
+        "category": "MSSQL Pilot"
+      },
+      {
+        "command": "mssql-pilot.showCacheStatus",
+        "title": "Show Schema Cache Status",
+        "category": "MSSQL Pilot"
+      }
+    ],
+    "configuration": {
+      "title": "MSSQL Pilot",
+      "properties": {
+        "mssqlPilot.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for background schema caching and the MSSQL Pilot autocomplete provider."
+        },
+        "mssqlPilot.syncThrottleSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Minimum seconds between background sync attempts for the same server+database."
+        },
+        "mssqlPilot.pollIntervalSeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 2,
+          "description": "How often to check whether the active editor's connection/database changed (mssql exposes no change event)."
+        },
+        "mssqlPilot.maxObjectsPerFirstSync": {
+          "type": "number",
+          "default": 20000,
+          "minimum": 0,
+          "description": "Safety cap on objects fetched during a database's very first full sync. 0 = no cap."
+        },
+        "mssqlPilot.enableCompletionProvider": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show MSSQL Pilot suggestions alongside mssql's own IntelliSense (independent of background caching, which can stay on)."
+        },
+        "mssqlPilot.excludedSchemas": {
+          "type": "array",
+          "default": [
+            "sys",
+            "INFORMATION_SCHEMA"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional schemas to exclude from caching (system objects are already excluded via is_ms_shipped)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "tsc -p ./",
+    "package": "node esbuild.js --production",
+    "watch": "tsc -w -p ./",
+    "watch:bundle": "node esbuild.js --watch",
+    "lint": "eslint src --ext ts",
+    "test:unit": "mocha --ui tdd --require source-map-support/register --require out/test/vscodeStub.js \"out/test/unit/**/*.test.js\"",
+    "test:integration": "mocha --ui tdd --require source-map-support/register --require out/test/vscodeStub.js \"out/test/integration/**/*.test.js\"",
+    "test:extension": "node out/test/runTests.js",
+    "test": "npm run compile && npm run test:unit && npm run test:integration"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "@types/proxyquire": "^1.3.31",
+    "@types/sinon": "^17.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^8.0.0",
+    "glob": "^10.3.0",
+    "mocha": "^11.7.6",
+    "proxyquire": "^2.1.3",
+    "sinon": "^17.0.0",
+    "source-map-support": "^0.5.21",
+    "typescript": "^5.3.0"
+  }
+}
