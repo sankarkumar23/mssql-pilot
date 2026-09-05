@@ -3,10 +3,10 @@
   "displayName": "MSSQL Pilot",
   "description": "Fast, persistent schema autocomplete for the mssql extension — instant IntelliSense for databases with thousands of tables, views, and stored procedures, even right after reconnecting.",
   "version": "0.1.0",
-  "publisher": "erexer",
+  "publisher": "skdarapu",
   "repository": {
     "type": "git",
-    "url": "https://github.com/erexer/mssql-pilot"
+    "url": "https://github.com/sankarkumar23/mssql-pilot"
   },
   "license": "MIT",
   "galleryBanner": {
@@ -104,6 +104,11 @@
             "type": "string"
           },
           "description": "Additional schemas to exclude from caching (system objects are already excluded via is_ms_shipped)."
+        },
+        "mssqlPilot.newLineAfterTableAlias": {
+          "type": "boolean",
+          "default": false,
+          "description": "After accepting a suggested table alias in a FROM/JOIN clause, drop to a new line so the next clause (JOIN/WHERE/...) starts clean. Off by default — many queries are written on a single line."
         }
       }
     }

@@ -29,3 +29,7 @@ export function getMaxObjectsPerFirstSync(): number {
 export function getExcludedSchemas(): string[] {
   return cfg().get<string[]>('excludedSchemas', ['sys', 'INFORMATION_SCHEMA']);
 }
+
+export function shouldAddNewLineAfterTableAlias(): boolean {
+  return cfg().get<boolean>('newLineAfterTableAlias', false);
+}

@@ -50,7 +50,7 @@ enum CompletionItemKind {
 class CompletionItem {
   detail?: string;
   documentation?: unknown;
-  insertText?: string;
+  insertText?: string | InstanceType<typeof SnippetString>;
   constructor(
     public label: string,
     public kind?: CompletionItemKind
@@ -61,6 +61,27 @@ class MarkdownString {
   value = '';
   appendMarkdown(text: string): this {
     this.value += text;
+    return this;
+  }
+}
+
+/** Minimal stand-in for VS Code's real SnippetString: escaping + auto-numbered tab stops. */
+class SnippetString {
+  value = '';
+  private nextTabstop = 1;
+  private escape(text: string): string {
+    return String(text).replace(/[$}\\]/g, '\\$&');
+  }
+  appendText(text: string): this {
+    this.value += this.escape(text);
+    return this;
+  }
+  appendPlaceholder(value: string): this {
+    this.value += `\${${this.nextTabstop++}:${this.escape(value)}}`;
+    return this;
+  }
+  appendTabstop(index?: number): this {
+    this.value += `$${index ?? this.nextTabstop++}`;
     return this;
   }
 }
@@ -94,6 +115,7 @@ const vscodeStub: any = {
   CompletionItem,
   CompletionItemKind,
   MarkdownString,
+  SnippetString,
   Disposable,
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   window: {

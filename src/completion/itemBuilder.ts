@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { DatabaseSchemaCache, SchemaObject, ColumnInfo, RoutineInfo } from '../cache/schemaTypes';
-import { buildAliasMap, getCompletionContext } from './contextParser';
+import { buildAliasMap, collectAliasedTableReferences, collectUsedAliases, getCompletionContext } from './contextParser';
+import { suggestAlias } from './aliasSuggester';
+import { shouldAddNewLineAfterTableAlias } from '../utils/config';
+
+/** Kinds that make sense as a `FROM`/`JOIN` source, and so can sensibly carry a suggested alias. */
+const ALIASABLE_KINDS = new Set<SchemaObject['kind']>(['table', 'view', 'tableFunction']);
 
 function kindLabel(kind: SchemaObject['kind']): string {
   switch (kind) {
@@ -62,10 +67,32 @@ function detailForColumn(col: ColumnInfo): string {
   return `MSSQL Pilot · column (${col.dataType}, ${nullability}${extras ? ', ' + extras : ''})`;
 }
 
-function buildObjectItem(obj: SchemaObject): vscode.CompletionItem {
+/**
+ * `schemaAlreadyTyped` is true when the completion is for a "schema." qualifier
+ * the user has already typed (e.g. "dbo.") — inserting the full "schema.name"
+ * in that case would duplicate the schema VS Code leaves in place, producing
+ * "dbo.dbo.Table".
+ *
+ * `aliasSuggestion`, when given, is appended as a snippet placeholder — the
+ * alias is pre-filled but stays selected, so accepting the completion as-is
+ * takes the alias, and just continuing to type overwrites it.
+ */
+function buildObjectItem(obj: SchemaObject, schemaAlreadyTyped: boolean, aliasSuggestion?: string): vscode.CompletionItem {
   const item = new vscode.CompletionItem(objectLabel(obj), kindToVscodeKind(obj.kind));
   item.detail = `MSSQL Pilot · ${kindLabel(obj.kind)}`;
-  item.insertText = objectLabel(obj);
+  const baseText = schemaAlreadyTyped ? obj.name : objectLabel(obj);
+  if (aliasSuggestion) {
+    const snippet = new vscode.SnippetString();
+    snippet.appendText(`${baseText} `);
+    snippet.appendPlaceholder(aliasSuggestion);
+    if (shouldAddNewLineAfterTableAlias()) {
+      snippet.appendText('\n');
+      snippet.appendTabstop(0); // explicit final cursor position — don't rely on the implicit end-of-snippet default
+    }
+    item.insertText = snippet;
+  } else {
+    item.insertText = baseText;
+  }
   if (obj.kind !== 'table' && obj.kind !== 'view') {
     item.documentation = docForRoutine(obj);
   }
@@ -79,9 +106,41 @@ function buildColumnItem(col: ColumnInfo): vscode.CompletionItem {
   return item;
 }
 
+/** Column completion pre-qualified with a table alias already in scope, e.g. "o.OrderId". */
+function buildAliasColumnItem(alias: string, col: ColumnInfo): vscode.CompletionItem {
+  const item = new vscode.CompletionItem(`${alias}.${col.name}`, vscode.CompletionItemKind.Field);
+  item.insertText = `${alias}.${col.name}`;
+  item.detail = detailForColumn(col);
+  item.documentation = docForColumn(col);
+  return item;
+}
+
 function columnsOf(obj: SchemaObject): ColumnInfo[] {
   if (obj.kind === 'table' || obj.kind === 'view') return obj.columns;
   return obj.tableColumns ?? [];
+}
+
+function resolveByBareName(objects: SchemaObject[], tableName: string): SchemaObject | undefined {
+  const lastSegment = tableName.split('.').pop()?.toLowerCase();
+  return objects.find((o) => o.name.toLowerCase() === lastSegment);
+}
+
+/**
+ * When the query already joins aliased tables, a bare word typed outside a
+ * FROM/JOIN clause (WHERE, ON, GROUP BY, ...) is almost always meant to
+ * reference one of those tables' columns, not name a brand-new object —
+ * suggesting alias.column beats listing every table in the database.
+ */
+function buildAliasedColumnCompletions(documentText: string, objects: SchemaObject[]): vscode.CompletionItem[] {
+  const items: vscode.CompletionItem[] = [];
+  for (const { tableName, alias } of collectAliasedTableReferences(documentText)) {
+    const target = resolveByBareName(objects, tableName);
+    if (!target) continue;
+    for (const col of columnsOf(target)) {
+      items.push(buildAliasColumnItem(alias, col));
+    }
+  }
+  return items;
 }
 
 /**
@@ -97,10 +156,26 @@ export function buildCompletionItems(
   const ctx = getCompletionContext(lineTextBeforeCursor);
   const objects = Object.values(cache.objects);
 
+  // Suggest an alias only when directly naming a table/view/TVF right after
+  // FROM/JOIN — this is the one bit of clause awareness added on top of the
+  // otherwise always-on, position-independent object-name completion below
+  // (full FROM/JOIN parsing is still deferred to v1.1; this is a cheap regex
+  // check, same spirit as buildAliasMap).
+  const usedAliases = ctx.isTableReferencePosition ? collectUsedAliases(document.getText()) : undefined;
+  const aliasFor = (o: SchemaObject): string | undefined =>
+    usedAliases && ALIASABLE_KINDS.has(o.kind) ? suggestAlias(o.name, usedAliases) : undefined;
+
   if (!ctx.qualifier) {
+    // Outside a FROM/JOIN clause, a joined query's own aliases make far more
+    // useful suggestions than every table in the database (e.g. typing a
+    // bare word in WHERE/ON/GROUP BY after "FROM dbo.Orders o JOIN ... c").
+    if (!ctx.isTableReferencePosition) {
+      const aliasColumnItems = buildAliasedColumnCompletions(document.getText(), objects);
+      if (aliasColumnItems.length > 0) return aliasColumnItems;
+    }
     // Always-on schema-qualified object name completion — no FROM/JOIN clause
     // awareness in v1 (deferred to v1.1; needs a real tokenizer to do properly).
-    return objects.map(buildObjectItem);
+    return objects.map((o) => buildObjectItem(o, false, aliasFor(o)));
   }
 
   const qualifierLower = ctx.qualifier.toLowerCase();
@@ -110,13 +185,13 @@ export function buildCompletionItems(
   // happens to collide with a schema name.
   const schemaMatches = objects.filter((o) => o.schema.toLowerCase() === qualifierLower);
   if (schemaMatches.length > 0) {
-    return schemaMatches.map(buildObjectItem);
+    return schemaMatches.map((o) => buildObjectItem(o, true, aliasFor(o)));
   }
 
   const aliasMap = buildAliasMap(document.getText());
   const resolvedTableName = aliasMap.get(qualifierLower);
   const target = resolvedTableName
-    ? objects.find((o) => o.name.toLowerCase() === (resolvedTableName.split('.').pop() ?? '').toLowerCase())
+    ? resolveByBareName(objects, resolvedTableName)
     : objects.find((o) => o.name.toLowerCase() === qualifierLower);
 
   if (!target) return [];
