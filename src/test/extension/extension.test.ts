@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 
-const EXT_ID = 'erexer.mssql-pilot';
+const EXT_ID = 'skdarapu.mssql-pilot';
 
 suite('Extension activation', () => {
   test('activates without throwing', async () => {
