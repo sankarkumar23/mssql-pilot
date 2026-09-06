@@ -112,6 +112,12 @@ suite('contextParser.collectUsedAliases', () => {
     const used = collectUsedAliases('SELECT * FROM dbo.Orders');
     assert.strictEqual(used.size, 0);
   });
+
+  test('excludes an alias the cursor is still sitting inside of', () => {
+    const text = 'SELECT * FROM dbo.Trade t';
+    const used = collectUsedAliases(text, text.length);
+    assert.strictEqual(used.size, 0);
+  });
 });
 
 suite('contextParser.collectAliasedTableReferences', () => {
@@ -128,5 +134,23 @@ suite('contextParser.collectAliasedTableReferences', () => {
   test('excludes references with no alias', () => {
     const refs = collectAliasedTableReferences('SELECT * FROM dbo.Orders');
     assert.deepStrictEqual(refs, []);
+  });
+
+  test('excludes an alias the cursor is still sitting inside of (mid-typed, not finished)', () => {
+    const text = 'SELECT * FROM dbo.Trade t';
+    // Cursor right after "t" — the alias is what's currently being typed.
+    const refs = collectAliasedTableReferences(text, text.length);
+    assert.deepStrictEqual(refs, []);
+  });
+
+  test('a finished alias earlier in the document is still included once the cursor has moved on', () => {
+    const text = 'SELECT * FROM dbo.Trade t WHERE ';
+    const refs = collectAliasedTableReferences(text, text.length);
+    assert.deepStrictEqual(refs, [{ tableName: 'dbo.Trade', alias: 't' }]);
+  });
+
+  test('with no cursorOffset given, every alias counts regardless (backward-compatible default)', () => {
+    const refs = collectAliasedTableReferences('SELECT * FROM dbo.Trade t');
+    assert.deepStrictEqual(refs, [{ tableName: 'dbo.Trade', alias: 't' }]);
   });
 });

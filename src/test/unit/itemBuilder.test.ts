@@ -4,10 +4,12 @@ import * as proxyquire from 'proxyquire';
 import { buildCompletionItems } from '../../completion/itemBuilder';
 import { DatabaseSchemaCache, TableInfo } from '../../cache/schemaTypes';
 
+// All fixtures here are single-line documents, so offsetAt reduces to the position's character.
 function fakeDocument(text: string, cursorLineText: string): vscode.TextDocument {
   return {
     getText: () => text,
     lineAt: (_line: number) => ({ text: cursorLineText }),
+    offsetAt: (pos: vscode.Position) => pos.character,
   } as unknown as vscode.TextDocument;
 }
 
@@ -169,6 +171,29 @@ suite('itemBuilder.buildCompletionItems', () => {
     const doc = fakeDocument(lineText, lineText);
     const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
     assert.strictEqual(items[0].insertText, 'dbo');
+  });
+
+  test('typing an alias manually right after a table does not offer alias.column completions for itself', () => {
+    const cache = buildCache({ 1: ordersTable });
+    // Cursor right after "t" — the user is mid-way through naming this
+    // alias, not ready to reference "t.column" yet. Should fall back to
+    // schema-first browsing (there's nothing sensible to suggest here),
+    // not surface "t.Id"/"t.Total" for the alias being typed right now.
+    // Same logic applies whether the object is a table or a view.
+    const text = 'SELECT * FROM dbo.Orders t';
+    const doc = fakeDocument(text, text);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
+    assert.strictEqual(items.some((i) => (i.label as string).startsWith('t.')), false);
+    assert.deepStrictEqual(items.map((i) => i.label), ['dbo']);
+  });
+
+  test('once the cursor has moved past a manually-typed alias, it becomes usable', () => {
+    const cache = buildCache({ 1: ordersTable });
+    const text = 'SELECT * FROM dbo.Orders t WHERE ';
+    const doc = fakeDocument(text, text);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['t.Id', 't.Total']);
   });
 
   test('no qualifier in WHERE with joins in scope: suggests alias.column for every joined table, not the whole database', () => {

@@ -12,6 +12,8 @@ export interface TableReference {
   tableName: string;
   /** The alias actually typed (explicit AS or implicit) — excludes a following keyword mistaken for one. */
   alias?: string;
+  /** Offset range of the alias token itself in the original text, if it has one. */
+  aliasRange?: readonly [start: number, end: number];
 }
 
 /** Scans for every `FROM <table> [AS] <alias>` / `JOIN <table> [AS] <alias>` in the text. */
@@ -25,27 +27,53 @@ function parseTableReferences(documentText: string): TableReference[] {
   let match: RegExpExecArray | null;
   while ((match = regex.exec(documentText)) !== null) {
     const tableName = match[1].replace(/[[\]]/g, '');
-    const rawAlias = (match[3] || match[4])?.replace(/[[\]]/g, '');
-    const alias = rawAlias && !SQL_KEYWORDS_AFTER_TABLE.has(rawAlias.toLowerCase()) ? rawAlias : undefined;
-    refs.push({ tableName, alias });
+    const rawAliasAsMatched = match[3] || match[4]; // brackets not yet stripped — needed for offset math below
+    const alias = rawAliasAsMatched?.replace(/[[\]]/g, '');
+    if (alias && !SQL_KEYWORDS_AFTER_TABLE.has(alias.toLowerCase())) {
+      // Nothing in the pattern follows the alias group, so when it matched,
+      // it's always the exact tail of the whole match — no need for the
+      // regex "d" flag to get its offset.
+      const end = match.index + match[0].length;
+      const start = end - rawAliasAsMatched!.length;
+      refs.push({ tableName, alias, aliasRange: [start, end] });
+    } else {
+      refs.push({ tableName });
+    }
   }
   return refs;
+}
+
+/**
+ * True when the cursor sits inside (or right at the end of) this
+ * reference's alias token — i.e. the alias is what's currently being
+ * typed, not an already-finished, ready-to-use alias. A regex scan over
+ * the whole document has no notion of "in progress"; this is what tells
+ * "FROM Trade t" (finished, elsewhere) apart from "FROM Trade t|" (the
+ * user is mid-way through naming this very alias, cursor right after it).
+ */
+function isAliasStillBeingTyped(ref: TableReference, cursorOffset: number | undefined): boolean {
+  if (cursorOffset === undefined || !ref.aliasRange) return false;
+  const [start, end] = ref.aliasRange;
+  return cursorOffset >= start && cursorOffset <= end;
 }
 
 /**
  * Builds a lookup from both the alias AND the bare table name (last dotted
  * segment) to the full table name as written. Recomputed per completion
  * request — cheap, SQL files are typically small, no caching needed.
+ *
+ * `cursorOffset`, when given, excludes an alias the cursor is still sitting
+ * inside of — see isAliasStillBeingTyped.
  */
-export function buildAliasMap(documentText: string): Map<string, string> {
+export function buildAliasMap(documentText: string, cursorOffset?: number): Map<string, string> {
   const map = new Map<string, string>();
-  for (const { tableName, alias } of parseTableReferences(documentText)) {
-    const lastSegment = tableName.split('.').pop();
+  for (const ref of parseTableReferences(documentText)) {
+    const lastSegment = ref.tableName.split('.').pop();
     if (lastSegment) {
-      map.set(lastSegment.toLowerCase(), tableName);
+      map.set(lastSegment.toLowerCase(), ref.tableName);
     }
-    if (alias) {
-      map.set(alias.toLowerCase(), tableName);
+    if (ref.alias && !isAliasStillBeingTyped(ref, cursorOffset)) {
+      map.set(ref.alias.toLowerCase(), ref.tableName);
     }
   }
   return map;
@@ -54,23 +82,37 @@ export function buildAliasMap(documentText: string): Map<string, string> {
 /**
  * Every alias already assigned to a table/view elsewhere in the document —
  * used to avoid suggesting a new alias that collides with one already in use
- * in the same query.
+ * in the same query. Excludes an alias still being typed at the cursor.
  */
-export function collectUsedAliases(documentText: string): Set<string> {
+export function collectUsedAliases(documentText: string, cursorOffset?: number): Set<string> {
   const aliases = new Set<string>();
-  for (const { alias } of parseTableReferences(documentText)) {
-    if (alias) {
-      aliases.add(alias.toLowerCase());
+  for (const ref of parseTableReferences(documentText)) {
+    if (ref.alias && !isAliasStillBeingTyped(ref, cursorOffset)) {
+      aliases.add(ref.alias.toLowerCase());
     }
   }
   return aliases;
 }
 
-/** Every `FROM`/`JOIN` reference in the document that actually got an alias — the tables in scope for alias.column completion. */
-export function collectAliasedTableReferences(documentText: string): Array<Required<TableReference>> {
-  return parseTableReferences(documentText).filter(
-    (ref): ref is Required<TableReference> => ref.alias !== undefined
-  );
+/**
+ * Every `FROM`/`JOIN` reference in the document that has a finished alias —
+ * the tables in scope for alias.column completion. Excludes a reference
+ * whose alias the cursor is still sitting inside of (see
+ * isAliasStillBeingTyped) — otherwise typing an alias manually right after a
+ * table/view (e.g. "FROM dbo.Trade t|") would immediately offer "t.column"
+ * completions for the very alias being composed, which makes no sense.
+ */
+export function collectAliasedTableReferences(
+  documentText: string,
+  cursorOffset?: number
+): Array<{ tableName: string; alias: string }> {
+  const refs: Array<{ tableName: string; alias: string }> = [];
+  for (const ref of parseTableReferences(documentText)) {
+    if (ref.alias && !isAliasStillBeingTyped(ref, cursorOffset)) {
+      refs.push({ tableName: ref.tableName, alias: ref.alias });
+    }
+  }
+  return refs;
 }
 
 export interface CompletionContext {

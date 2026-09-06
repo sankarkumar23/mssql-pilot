@@ -146,9 +146,13 @@ function resolveByBareName(objects: SchemaObject[], tableName: string): SchemaOb
  * reference one of those tables' columns, not name a brand-new object —
  * suggesting alias.column beats listing every table in the database.
  */
-function buildAliasedColumnCompletions(documentText: string, objects: SchemaObject[]): vscode.CompletionItem[] {
+function buildAliasedColumnCompletions(
+  documentText: string,
+  objects: SchemaObject[],
+  cursorOffset: number
+): vscode.CompletionItem[] {
   const items: vscode.CompletionItem[] = [];
-  for (const { tableName, alias } of collectAliasedTableReferences(documentText)) {
+  for (const { tableName, alias } of collectAliasedTableReferences(documentText, cursorOffset)) {
     const target = resolveByBareName(objects, tableName);
     if (!target) continue;
     for (const col of columnsOf(target)) {
@@ -170,11 +174,13 @@ export function buildCompletionItems(
   const lineTextBeforeCursor = document.lineAt(position.line).text.slice(0, position.character);
   const ctx = getCompletionContext(lineTextBeforeCursor);
   const objects = Object.values(cache.objects);
+  const documentText = document.getText();
+  const cursorOffset = document.offsetAt(position);
 
   // Suggest an alias only when directly naming a table/view/TVF right after
   // FROM/JOIN (cheap regex check, same spirit as buildAliasMap — not a full
   // tokenizer, that's still deferred to v1.1).
-  const usedAliases = ctx.isTableReferencePosition ? collectUsedAliases(document.getText()) : undefined;
+  const usedAliases = ctx.isTableReferencePosition ? collectUsedAliases(documentText, cursorOffset) : undefined;
   const aliasFor = (o: SchemaObject): string | undefined =>
     usedAliases && ALIASABLE_KINDS.has(o.kind) ? suggestAlias(o.name, usedAliases) : undefined;
 
@@ -182,8 +188,11 @@ export function buildCompletionItems(
     // Outside a FROM/JOIN clause, a joined query's own aliases make far more
     // useful suggestions than every table in the database (e.g. typing a
     // bare word in WHERE/ON/GROUP BY after "FROM dbo.Orders o JOIN ... c").
+    // This must exclude an alias the cursor is still typing right now (e.g.
+    // "FROM dbo.Trade t|" naming the alias manually) — otherwise it offers
+    // nonsensical "t.column" completions for the very alias being composed.
     if (!ctx.isTableReferencePosition) {
-      const aliasColumnItems = buildAliasedColumnCompletions(document.getText(), objects);
+      const aliasColumnItems = buildAliasedColumnCompletions(documentText, objects, cursorOffset);
       if (aliasColumnItems.length > 0) return aliasColumnItems;
     }
     // Resolve the schema first, then its objects — with many schemas in the
@@ -204,7 +213,7 @@ export function buildCompletionItems(
     return schemaMatches.map((o) => buildObjectItem(o, aliasFor(o)));
   }
 
-  const aliasMap = buildAliasMap(document.getText());
+  const aliasMap = buildAliasMap(documentText, cursorOffset);
   const resolvedTableName = aliasMap.get(qualifierLower);
   const target = resolvedTableName
     ? resolveByBareName(objects, resolvedTableName)
