@@ -31,10 +31,6 @@ function kindToVscodeKind(kind: SchemaObject['kind']): vscode.CompletionItemKind
   }
 }
 
-function objectLabel(obj: SchemaObject): string {
-  return `${obj.schema}.${obj.name}`;
-}
-
 const VALID_UNQUOTED_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
@@ -44,10 +40,6 @@ const VALID_UNQUOTED_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  */
 function quoteIdentifierIfNeeded(name: string): string {
   return VALID_UNQUOTED_IDENTIFIER.test(name) ? name : `[${name.replace(/\]/g, ']]')}]`;
-}
-
-function quotedObjectName(obj: SchemaObject): string {
-  return `${quoteIdentifierIfNeeded(obj.schema)}.${quoteIdentifierIfNeeded(obj.name)}`;
 }
 
 function docForColumn(col: ColumnInfo): vscode.MarkdownString {
@@ -83,19 +75,18 @@ function detailForColumn(col: ColumnInfo): string {
 }
 
 /**
- * `schemaAlreadyTyped` is true when the completion is for a "schema." qualifier
- * the user has already typed (e.g. "dbo.") — inserting the full "schema.name"
- * in that case would duplicate the schema VS Code leaves in place, producing
- * "dbo.dbo.Table".
+ * Called only once the schema is already resolved (browsing is schema-first —
+ * see buildCompletionItems), so both the label and the inserted text are just
+ * the bare object name, not "schema.name" — the schema is already typed.
  *
  * `aliasSuggestion`, when given, is appended as a snippet placeholder — the
  * alias is pre-filled but stays selected, so accepting the completion as-is
  * takes the alias, and just continuing to type overwrites it.
  */
-function buildObjectItem(obj: SchemaObject, schemaAlreadyTyped: boolean, aliasSuggestion?: string): vscode.CompletionItem {
-  const item = new vscode.CompletionItem(objectLabel(obj), kindToVscodeKind(obj.kind));
+function buildObjectItem(obj: SchemaObject, aliasSuggestion?: string): vscode.CompletionItem {
+  const baseText = quoteIdentifierIfNeeded(obj.name);
+  const item = new vscode.CompletionItem(obj.name, kindToVscodeKind(obj.kind));
   item.detail = `MSSQL Pilot · ${kindLabel(obj.kind)}`;
-  const baseText = schemaAlreadyTyped ? quoteIdentifierIfNeeded(obj.name) : quotedObjectName(obj);
   if (aliasSuggestion) {
     const snippet = new vscode.SnippetString();
     snippet.appendText(`${baseText} `);
@@ -210,7 +201,7 @@ export function buildCompletionItems(
   // happens to collide with a schema name.
   const schemaMatches = objects.filter((o) => o.schema.toLowerCase() === qualifierLower);
   if (schemaMatches.length > 0) {
-    return schemaMatches.map((o) => buildObjectItem(o, true, aliasFor(o)));
+    return schemaMatches.map((o) => buildObjectItem(o, aliasFor(o)));
   }
 
   const aliasMap = buildAliasMap(document.getText());

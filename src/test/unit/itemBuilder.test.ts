@@ -92,13 +92,13 @@ suite('itemBuilder.buildCompletionItems', () => {
     assert.deepStrictEqual(items.map((i) => i.label), ['dbo', 'S4RAW', 'TRDCPAPP']);
   });
 
-  test('schema qualifier suggests that schema\'s objects', () => {
+  test('schema qualifier suggests that schema\'s objects, by bare name (schema is already typed)', () => {
     const cache = buildCache({ 1: ordersTable });
     const lineText = 'SELECT * FROM dbo.';
     const doc = fakeDocument(lineText, lineText);
     const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
     assert.strictEqual(items.length, 1);
-    assert.strictEqual(items[0].label, 'dbo.Orders');
+    assert.strictEqual(items[0].label, 'Orders');
   });
 
   test('schema qualifier already typed, not in a table-reference position: insertText is bare name, no alias', () => {
@@ -155,7 +155,7 @@ suite('itemBuilder.buildCompletionItems', () => {
     const text = 'SELECT * FROM dbo.Orders o JOIN dbo.';
     const doc = fakeDocument(text, text);
     const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
-    const owners = items.find((i) => i.label === 'dbo.Owners')!;
+    const owners = items.find((i) => i.label === 'Owners')!;
     const snippet = owners.insertText as unknown as { value: string };
     assert.strictEqual(snippet.value, 'Owners ${1:o2}');
   });
@@ -225,7 +225,7 @@ suite('itemBuilder.buildCompletionItems', () => {
     // Table stage, schema already typed (bracketed, as the previous step would insert it).
     const lineText = 'SELECT * FROM [My Schema].';
     const tableItems = buildCompletionItems(cache, fakeDocument(lineText, lineText), positionAtEndOf(lineText));
-    assert.strictEqual(tableItems[0].label, 'My Schema.My Table');
+    assert.strictEqual(tableItems[0].label, 'My Table');
     const snippet = tableItems[0].insertText as unknown as { value: string };
     assert.ok(snippet.value.startsWith('[My Table] '), snippet.value);
 
