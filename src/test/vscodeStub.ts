@@ -86,6 +86,16 @@ class SnippetString {
   }
 }
 
+class TextEdit {
+  constructor(
+    public readonly range: Range,
+    public readonly newText: string
+  ) {}
+  static replace(range: Range, newText: string): TextEdit {
+    return new TextEdit(range, newText);
+  }
+}
+
 class Disposable {
   constructor(private readonly onDispose: () => void) {}
   dispose(): void {
@@ -116,6 +126,7 @@ const vscodeStub: any = {
   CompletionItemKind,
   MarkdownString,
   SnippetString,
+  TextEdit,
   Disposable,
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   window: {
@@ -158,6 +169,7 @@ const vscodeStub: any = {
   },
   languages: {
     registerCompletionItemProvider: (..._args: unknown[]) => ({ dispose() {} }),
+    registerOnTypeFormattingEditProvider: (..._args: unknown[]) => ({ dispose() {} }),
   },
   extensions: {
     getExtension: (_id: string) => undefined,

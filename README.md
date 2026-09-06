@@ -32,6 +32,8 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 | `mssqlPilot.maxObjectsPerFirstSync` | `20000` | Safety cap on objects fetched during a database's very first full sync (0 = no cap) |
 | `mssqlPilot.enableCompletionProvider` | `true` | Show MSSQL Pilot suggestions alongside mssql's own IntelliSense |
 | `mssqlPilot.excludedSchemas` | `["sys","INFORMATION_SCHEMA"]` | Extra schemas to exclude from caching |
+| `mssqlPilot.newLineAfterTableAlias` | `false` | After accepting a suggested table alias, drop to a new line for the next clause |
+| `mssqlPilot.uppercaseKeywordsOnType` | `false` | Automatically uppercase T-SQL reserved keywords as you finish typing them |
 
 ## Known limitations
 

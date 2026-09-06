@@ -33,3 +33,7 @@ export function getExcludedSchemas(): string[] {
 export function shouldAddNewLineAfterTableAlias(): boolean {
   return cfg().get<boolean>('newLineAfterTableAlias', false);
 }
+
+export function shouldUppercaseKeywordsOnType(): boolean {
+  return cfg().get<boolean>('uppercaseKeywordsOnType', false);
+}

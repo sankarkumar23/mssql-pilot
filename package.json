@@ -109,6 +109,11 @@
           "type": "boolean",
           "default": false,
           "description": "After accepting a suggested table alias in a FROM/JOIN clause, drop to a new line so the next clause (JOIN/WHERE/...) starts clean. Off by default — many queries are written on a single line."
+        },
+        "mssqlPilot.uppercaseKeywordsOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically uppercase T-SQL reserved keywords (SELECT, FROM, WHERE, JOIN, ...) as you finish typing them. Off by default."
         }
       }
     }
