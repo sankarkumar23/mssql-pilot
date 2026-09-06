@@ -196,6 +196,26 @@ suite('itemBuilder.buildCompletionItems', () => {
     assert.deepStrictEqual(labels, ['t.Id', 't.Total']);
   });
 
+  test('typing "alias." right after declaring that alias, still inside FROM, offers nothing (not valid SQL there)', () => {
+    // Reproduces the reported case: "select * from TRDCPAPP.Position p."
+    // "p." is never valid syntax directly inside a FROM clause — only after
+    // it (WHERE/ON/SELECT/...). Applies to views identically to tables.
+    const cache = buildCache({ 1: ordersTable });
+    const text = 'select * from dbo.Orders p.';
+    const doc = fakeDocument(text, text);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
+    assert.deepStrictEqual(items, []);
+  });
+
+  test('the same alias resolves normally once used outside the FROM/JOIN clause that declared it', () => {
+    const cache = buildCache({ 1: ordersTable });
+    const text = 'select * from dbo.Orders p WHERE p.';
+    const doc = fakeDocument(text, text);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['Id', 'Total']);
+  });
+
   test('no qualifier in WHERE with joins in scope: suggests alias.column for every joined table, not the whole database', () => {
     const cache = buildCache({ 1: ordersTable, 4: customersTable, 2: pilotTestTable });
     const text = 'SELECT * FROM dbo.Orders o JOIN dbo.Customers c ON o.CustomerId = c.Id WHERE ';

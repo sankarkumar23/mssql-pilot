@@ -213,6 +213,12 @@ export function buildCompletionItems(
     return schemaMatches.map((o) => buildObjectItem(o, aliasFor(o)));
   }
 
+  // "FROM dbo.Trade p." right after finishing "p" — "p" is a real, finished
+  // alias, but "alias.column" is never valid syntax inside the very FROM/JOIN
+  // clause that declared it (only after, in WHERE/ON/SELECT/...). Nothing
+  // sensible to suggest here.
+  if (ctx.qualifierJustDeclared) return [];
+
   const aliasMap = buildAliasMap(documentText, cursorOffset);
   const resolvedTableName = aliasMap.get(qualifierLower);
   const target = resolvedTableName

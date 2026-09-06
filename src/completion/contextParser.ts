@@ -122,6 +122,21 @@ export interface CompletionContext {
   qualifier: string | undefined;
   /** True when the identifier being typed directly follows FROM/JOIN — naming a table, not referencing an alias. */
   isTableReferencePosition: boolean;
+  /**
+   * True when `qualifier` is the alias that was *just* declared, immediately
+   * before this very reference, on this same line (e.g. "FROM dbo.Trade t."
+   * right after finishing "t"). "alias.column" is only valid SQL outside the
+   * FROM/JOIN clause the alias belongs to (WHERE, ON, SELECT, ...) — never
+   * directly inside it — so resolving the alias here, even though it's a
+   * "finished" alias by then, would offer completions for a table reference
+   * that isn't done yet and produce something that can't legally follow.
+   */
+  qualifierJustDeclared: boolean;
+}
+
+/** Escapes a string for literal use inside a `new RegExp(...)` pattern. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Parses the text of the current line up to the cursor. */
@@ -134,9 +149,27 @@ export function getCompletionContext(lineTextBeforeCursor: string): CompletionCo
   const matchStart = match?.index ?? lineTextBeforeCursor.length;
   const textBeforeMatch = lineTextBeforeCursor.slice(0, matchStart);
   const rawQualifier = match?.[1];
+  const qualifier = rawQualifier?.replace(/^\[|\]$/g, '');
+
+  let qualifierJustDeclared = false;
+  if (qualifier && rawQualifier) {
+    // Text up to and including the qualifier itself (excluding the "." and
+    // whatever's typed after it) — if a FROM/JOIN table reference's alias
+    // ends exactly here, this qualifier IS that alias, freshly declared.
+    const textThroughQualifier = lineTextBeforeCursor.slice(0, matchStart + rawQualifier.length);
+    const escapedAlias = escapeRegExp(qualifier);
+    const declarationPattern = new RegExp(
+      `\\b(?:FROM|JOIN)\\s+(?:\\[[^\\]]+\\]|\\w+)(?:\\.(?:\\[[^\\]]+\\]|\\w+))*` +
+      `\\s+(?:AS\\s+)?(?:\\[${escapedAlias}\\]|${escapedAlias})\\s*$`,
+      'i'
+    );
+    qualifierJustDeclared = declarationPattern.test(textThroughQualifier);
+  }
+
   return {
     wordPrefix: match?.[2] ?? '',
-    qualifier: rawQualifier?.replace(/^\[|\]$/g, ''),
+    qualifier,
     isTableReferencePosition: /\b(?:FROM|JOIN)\s*$/i.test(textBeforeMatch),
+    qualifierJustDeclared,
   };
 }

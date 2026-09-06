@@ -95,6 +95,29 @@ suite('contextParser.getCompletionContext', () => {
     assert.strictEqual(getCompletionContext('SELECT dbo.').isTableReferencePosition, false);
     assert.strictEqual(getCompletionContext('SELECT Ord').isTableReferencePosition, false);
   });
+
+  test('qualifierJustDeclared is true right after finishing a table\'s own alias (implicit)', () => {
+    assert.strictEqual(getCompletionContext('SELECT * FROM dbo.Position p.').qualifierJustDeclared, true);
+  });
+
+  test('qualifierJustDeclared is true right after finishing a table\'s own alias (explicit AS)', () => {
+    assert.strictEqual(getCompletionContext('SELECT * FROM dbo.Position AS p.').qualifierJustDeclared, true);
+  });
+
+  test('qualifierJustDeclared is false once other content separates the alias from this reference', () => {
+    assert.strictEqual(
+      getCompletionContext('SELECT * FROM dbo.Orders o JOIN dbo.Customers c ON o.').qualifierJustDeclared,
+      false
+    );
+  });
+
+  test('qualifierJustDeclared is false for a plain alias-qualifier column completion', () => {
+    assert.strictEqual(getCompletionContext('SELECT o.').qualifierJustDeclared, false);
+  });
+
+  test('qualifierJustDeclared is false when there is no qualifier at all', () => {
+    assert.strictEqual(getCompletionContext('SELECT * FROM ').qualifierJustDeclared, false);
+  });
 });
 
 suite('contextParser.collectUsedAliases', () => {
