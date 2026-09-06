@@ -33,7 +33,7 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 | `mssqlPilot.enableCompletionProvider` | `true` | Show MSSQL Pilot suggestions alongside mssql's own IntelliSense |
 | `mssqlPilot.excludedSchemas` | `["sys","INFORMATION_SCHEMA"]` | Extra schemas to exclude from caching |
 | `mssqlPilot.newLineAfterTableAlias` | `false` | After accepting a suggested table alias, drop to a new line for the next clause |
-| `mssqlPilot.uppercaseKeywordsOnType` | `false` | Automatically uppercase T-SQL reserved keywords as you finish typing them |
+| `mssqlPilot.uppercaseKeywordsOnType` | `false` | Automatically uppercase T-SQL reserved keywords as you finish typing them. Also requires VS Code's own `editor.formatOnType` to be enabled (off by default) — otherwise this setting has no effect |
 
 ## Known limitations
 

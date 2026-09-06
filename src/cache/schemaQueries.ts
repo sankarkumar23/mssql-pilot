@@ -3,6 +3,12 @@ import { SqlObjectKind } from './schemaTypes';
 
 export const SERVER_NAME_QUERY = 'SELECT @@SERVERNAME AS s';
 
+function buildSchemaExclusionClause(excludedSchemas: string[]): string {
+  return excludedSchemas.length > 0
+    ? `AND s.name NOT IN (${excludedSchemas.map((s) => `'${s.replace(/'/g, "''")}'`).join(',')})`
+    : '';
+}
+
 /**
  * Phase 1: cheap id + watermark listing. A pure sys.objects catalog scan —
  * never SMO's heavier scripting/binding machinery — cheap even at
@@ -11,9 +17,7 @@ export const SERVER_NAME_QUERY = 'SELECT @@SERVERNAME AS s';
  * string for diffing across syncs.
  */
 export function buildObjectListingQuery(excludedSchemas: string[]): string {
-  const exclusion = excludedSchemas.length > 0
-    ? `AND s.name NOT IN (${excludedSchemas.map((s) => `'${s.replace(/'/g, "''")}'`).join(',')})`
-    : '';
+  const exclusion = buildSchemaExclusionClause(excludedSchemas);
   return `
 SELECT o.object_id, s.name AS schema_name, o.name AS object_name, o.type AS object_type,
        CONVERT(varchar(33), o.modify_date, 126) AS modify_date
@@ -22,6 +26,24 @@ JOIN sys.schemas AS s ON s.schema_id = o.schema_id
 WHERE o.type IN ('U','V','P','FN','IF','TF') AND o.is_ms_shipped = 0
 ${exclusion}
 ORDER BY o.object_id;`;
+}
+
+/**
+ * Distinct schema names only — a tiny, indexed catalog query, run
+ * independently of the (potentially capped) object listing above. This is
+ * what keeps schema-first browsing complete even on a database with more
+ * objects than mssqlPilot.maxObjectsPerFirstSync: the schema list never
+ * depends on how many of those objects actually made it into the cache.
+ */
+export function buildSchemaListingQuery(excludedSchemas: string[]): string {
+  const exclusion = buildSchemaExclusionClause(excludedSchemas);
+  return `
+SELECT DISTINCT s.name AS schema_name
+FROM sys.schemas AS s
+JOIN sys.objects AS o ON o.schema_id = s.schema_id
+WHERE o.type IN ('U','V','P','FN','IF','TF') AND o.is_ms_shipped = 0
+${exclusion}
+ORDER BY s.name;`;
 }
 
 /** Phase 2, tables/views: column details. Ids are our own Phase 1 output (never user input), safe to inline. */
@@ -165,4 +187,8 @@ export function mapParameterRows(result: SimpleExecuteResult): ParameterRow[] {
 
 export function extractServerName(result: SimpleExecuteResult): string {
   return result.rows?.[0]?.[0]?.displayValue ?? '';
+}
+
+export function mapSchemaListingRows(result: SimpleExecuteResult): string[] {
+  return rowsToObjects(result).map((r) => r.schema_name ?? '').filter((name) => name.length > 0);
 }

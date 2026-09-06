@@ -113,7 +113,8 @@
         "mssqlPilot.uppercaseKeywordsOnType": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically uppercase T-SQL reserved keywords (SELECT, FROM, WHERE, JOIN, ...) as you finish typing them. Off by default."
+          "description": "Automatically uppercase T-SQL reserved keywords (SELECT, FROM, WHERE, JOIN, ...) as you finish typing them. Off by default. Also requires editor.formatOnType to be enabled (VS Code disables on-type formatting by default) — otherwise this setting has no effect.",
+          "markdownDescription": "Automatically uppercase T-SQL reserved keywords (`SELECT`, `FROM`, `WHERE`, `JOIN`, ...) as you finish typing them. Off by default.\n\n**Also requires [`editor.formatOnType`](#editor.formatOnType) to be enabled** (VS Code disables on-type formatting by default) — without it, this setting has no effect. Enable it globally, or scope it to SQL only:\n```json\n\"[sql]\": { \"editor.formatOnType\": true }\n```"
         }
       }
     }

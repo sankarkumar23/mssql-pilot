@@ -60,11 +60,18 @@ export type SchemaObject = TableInfo | ViewInfo | RoutineInfo;
 /** Full on-disk payload for one server+database. */
 export interface DatabaseSchemaCache {
   /** Bump on breaking shape changes. A mismatch is treated as "absent" and rebuilt from scratch. */
-  formatVersion: 1;
+  formatVersion: 2;
   server: string;
   database: string;
   /** Keyed by sys.objects.object_id — stable across renames, enables O(1) diff/lookup. */
   objects: Record<number, SchemaObject>;
+  /**
+   * Every schema that owns at least one cacheable object, sourced from its
+   * own cheap sys.schemas query — independent of maxObjectsPerFirstSync
+   * capping the object listing, so schema-first browsing stays complete
+   * even on a huge database where the object cap has been hit.
+   */
+  schemas: string[];
   lastFullSyncAt: string;
   lastDeltaSyncAt: string;
 }
@@ -85,10 +92,11 @@ export interface CacheManifest {
 
 export function emptyDatabaseSchemaCache(server: string, database: string): DatabaseSchemaCache {
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     server,
     database,
     objects: {},
+    schemas: [],
     lastFullSyncAt: '',
     lastDeltaSyncAt: '',
   };

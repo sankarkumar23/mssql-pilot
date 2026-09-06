@@ -51,7 +51,7 @@ export async function readDatabaseSchemaCache(
   cacheKey: string
 ): Promise<DatabaseSchemaCache | undefined> {
   const value = await readJson<DatabaseSchemaCache>(cacheFileUri(globalStorageUri, cacheKey));
-  if (!value || value.formatVersion !== 1) {
+  if (!value || value.formatVersion !== 2) {
     return undefined;
   }
   return value;

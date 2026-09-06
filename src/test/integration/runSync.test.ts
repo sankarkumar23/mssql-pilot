@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { MockConnectionSharingService } from './mocks/mockMssqlApi';
-import { objectListingResult, columnsResult } from './mocks/sampleSchemaRows';
+import { objectListingResult, columnsResult, schemaListingResult } from './mocks/sampleSchemaRows';
 import { runSync } from '../../cache/syncEngine';
 import { emptyDatabaseSchemaCache } from '../../cache/schemaTypes';
 import { TableInfo } from '../../cache/schemaTypes';
@@ -16,6 +16,9 @@ suite('syncEngine.runSync (integration)', () => {
     cs.executeSimpleQuery.callsFake(async (_uri: string, sql: string) => {
       if (sql.includes('FROM sys.objects')) {
         return objectListingResult([[1, 'dbo', 'Orders', 'U', '2026-01-01T00:00:00.000']]);
+      }
+      if (sql.includes('FROM sys.schemas')) {
+        return schemaListingResult(['dbo']);
       }
       if (sql.includes('FROM sys.columns')) {
         return columnsResult([[1, 1, 'Id', 'int']]);
@@ -33,6 +36,29 @@ suite('syncEngine.runSync (integration)', () => {
     assert.strictEqual(table.columns[0].name, 'Id');
     assert.ok(next!.lastFullSyncAt.length > 0);
     assert.ok(cs.disconnect.called, 'connection should always be released');
+  });
+
+  test('the schema list comes from its own query, independent of the object listing', async () => {
+    cs.executeSimpleQuery.callsFake(async (_uri: string, sql: string) => {
+      // Only "dbo" actually has an object in the (simulated capped) listing,
+      // but the schema query independently reports a second schema too.
+      if (sql.includes('FROM sys.objects')) {
+        return objectListingResult([[1, 'dbo', 'Orders', 'U', '2026-01-01T00:00:00.000']]);
+      }
+      if (sql.includes('FROM sys.schemas')) {
+        return schemaListingResult(['dbo', 'TRDCPAPP']);
+      }
+      if (sql.includes('FROM sys.columns')) {
+        return columnsResult([[1, 1, 'Id', 'int']]);
+      }
+      return { rowCount: 0, columnInfo: [], rows: [] };
+    });
+
+    const current = emptyDatabaseSchemaCache('HOST', 'DB');
+    const next = await runSync(cs, 'mssql-pilot', 'conn-1', current);
+
+    assert.ok(next);
+    assert.deepStrictEqual(next!.schemas, ['dbo', 'TRDCPAPP']);
   });
 
   test('delta sync with an unchanged listing fetches zero detail queries', async () => {

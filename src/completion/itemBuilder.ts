@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { DatabaseSchemaCache, SchemaObject, ColumnInfo, RoutineInfo } from '../cache/schemaTypes';
+import { getSchemaIndex, SchemaIndex } from '../cache/schemaIndex';
 import { buildAliasMap, collectAliasedTableReferences, collectUsedAliases, getCompletionContext } from './contextParser';
 import { suggestAlias } from './aliasSuggester';
 import { shouldAddNewLineAfterTableAlias } from '../utils/config';
@@ -135,9 +136,10 @@ function columnsOf(obj: SchemaObject): ColumnInfo[] {
   return obj.tableColumns ?? [];
 }
 
-function resolveByBareName(objects: SchemaObject[], tableName: string): SchemaObject | undefined {
+function resolveByBareName(index: SchemaIndex, tableName: string): SchemaObject | undefined {
   const lastSegment = tableName.split('.').pop()?.toLowerCase();
-  return objects.find((o) => o.name.toLowerCase() === lastSegment);
+  if (!lastSegment) return undefined;
+  return index.byName.get(lastSegment)?.[0];
 }
 
 /**
@@ -148,12 +150,12 @@ function resolveByBareName(objects: SchemaObject[], tableName: string): SchemaOb
  */
 function buildAliasedColumnCompletions(
   documentText: string,
-  objects: SchemaObject[],
+  index: SchemaIndex,
   cursorOffset: number
 ): vscode.CompletionItem[] {
   const items: vscode.CompletionItem[] = [];
   for (const { tableName, alias } of collectAliasedTableReferences(documentText, cursorOffset)) {
-    const target = resolveByBareName(objects, tableName);
+    const target = resolveByBareName(index, tableName);
     if (!target) continue;
     for (const col of columnsOf(target)) {
       items.push(buildAliasColumnItem(alias, col));
@@ -173,7 +175,7 @@ export function buildCompletionItems(
 ): vscode.CompletionItem[] {
   const lineTextBeforeCursor = document.lineAt(position.line).text.slice(0, position.character);
   const ctx = getCompletionContext(lineTextBeforeCursor);
-  const objects = Object.values(cache.objects);
+  const index = getSchemaIndex(cache);
   const documentText = document.getText();
   const cursorOffset = document.offsetAt(position);
 
@@ -192,15 +194,14 @@ export function buildCompletionItems(
     // "FROM dbo.Trade t|" naming the alias manually) — otherwise it offers
     // nonsensical "t.column" completions for the very alias being composed.
     if (!ctx.isTableReferencePosition) {
-      const aliasColumnItems = buildAliasedColumnCompletions(documentText, objects, cursorOffset);
+      const aliasColumnItems = buildAliasedColumnCompletions(documentText, index, cursorOffset);
       if (aliasColumnItems.length > 0) return aliasColumnItems;
     }
     // Resolve the schema first, then its objects — with many schemas in the
     // database, a flat list of every table across every schema at once is
     // unusable. Typing "." after a schema name (handled below) narrows to
     // that schema's objects.
-    const schemas = [...new Set(objects.map((o) => o.schema))].sort((a, b) => a.localeCompare(b));
-    return schemas.map(buildSchemaItem);
+    return index.schemas.map(buildSchemaItem);
   }
 
   const qualifierLower = ctx.qualifier.toLowerCase();
@@ -208,8 +209,8 @@ export function buildCompletionItems(
   // Schema-name match takes precedence over alias/table match when ambiguous —
   // "dbo." is a far more common typing pattern than a one-letter alias that
   // happens to collide with a schema name.
-  const schemaMatches = objects.filter((o) => o.schema.toLowerCase() === qualifierLower);
-  if (schemaMatches.length > 0) {
+  const schemaMatches = index.bySchema.get(qualifierLower);
+  if (schemaMatches && schemaMatches.length > 0) {
     return schemaMatches.map((o) => buildObjectItem(o, aliasFor(o)));
   }
 
@@ -222,8 +223,8 @@ export function buildCompletionItems(
   const aliasMap = buildAliasMap(documentText, cursorOffset);
   const resolvedTableName = aliasMap.get(qualifierLower);
   const target = resolvedTableName
-    ? resolveByBareName(objects, resolvedTableName)
-    : objects.find((o) => o.name.toLowerCase() === qualifierLower);
+    ? resolveByBareName(index, resolvedTableName)
+    : index.byName.get(qualifierLower)?.[0];
 
   if (!target) return [];
   return columnsOf(target).map(buildColumnItem);

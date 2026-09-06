@@ -13,8 +13,16 @@ function fakeDocument(text: string, cursorLineText: string): vscode.TextDocument
   } as unknown as vscode.TextDocument;
 }
 
-function buildCache(objects: DatabaseSchemaCache['objects']): DatabaseSchemaCache {
-  return { formatVersion: 1, server: 's', database: 'd', objects, lastFullSyncAt: '', lastDeltaSyncAt: '' };
+function buildCache(objects: DatabaseSchemaCache['objects'], schemas?: string[]): DatabaseSchemaCache {
+  return {
+    formatVersion: 2,
+    server: 's',
+    database: 'd',
+    objects,
+    schemas: schemas ?? [...new Set(Object.values(objects).map((o) => o.schema))],
+    lastFullSyncAt: '',
+    lastDeltaSyncAt: '',
+  };
 }
 
 const ordersTable: TableInfo = {
@@ -280,6 +288,14 @@ suite('itemBuilder.buildCompletionItems', () => {
     const colItems = buildCompletionItems(cache, fakeDocument(text2, lineText2), positionAtEndOf(lineText2));
     assert.strictEqual(colItems[0].label, 'Order Id');
     assert.strictEqual(colItems[0].insertText, '[Order Id]');
+  });
+
+  test('a schema with no cached objects yet (e.g. capped out of the object listing) still appears in browsing', () => {
+    const cache = buildCache({ 1: ordersTable }, ['dbo', 'TRDCPAPP']);
+    const lineText = 'SELECT * FROM ';
+    const doc = fakeDocument(lineText, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    assert.deepStrictEqual(items.map((i) => i.label), ['dbo', 'TRDCPAPP']);
   });
 
   test('unresolvable qualifier returns no items', () => {

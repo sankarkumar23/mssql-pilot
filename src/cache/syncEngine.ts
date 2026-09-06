@@ -5,9 +5,11 @@ import { log, describeError } from '../utils/outputChannel';
 import { getExcludedSchemas, getMaxObjectsPerFirstSync } from '../utils/config';
 import {
   buildObjectListingQuery,
+  buildSchemaListingQuery,
   buildColumnsQuery,
   buildParametersQuery,
   mapObjectListingRows,
+  mapSchemaListingRows,
   mapColumnRows,
   mapParameterRows,
   ObjectListingRow,
@@ -191,6 +193,12 @@ export async function runSync(
       const listingResult = await cs.executeSimpleQuery(uri, buildObjectListingQuery(excludedSchemas));
       let fresh = mapObjectListingRows(listingResult);
 
+      // Its own cheap, separate query — deliberately not derived from `fresh`
+      // above, so the schema list stays complete even when the object
+      // listing gets capped by maxObjectsPerFirstSync below.
+      const schemaListingResult = await cs.executeSimpleQuery(uri, buildSchemaListingQuery(excludedSchemas));
+      const freshSchemas = mapSchemaListingRows(schemaListingResult);
+
       const isFullSync = Object.keys(current.objects).length === 0;
       if (isFullSync) {
         const cap = getMaxObjectsPerFirstSync();
@@ -246,6 +254,7 @@ export async function runSync(
       const next: DatabaseSchemaCache = {
         ...current,
         objects: { ...current.objects },
+        schemas: freshSchemas,
       };
       for (const id of diff.removed) {
         delete next.objects[id];
@@ -259,7 +268,8 @@ export async function runSync(
 
       log(
         `[sync] ${current.server}/${current.database}: ${isFullSync ? 'full' : 'delta'} sync — ` +
-        `+${diff.added.length} ~${diff.changed.length} -${diff.removed.length} =${diff.unchangedCount}`
+        `+${diff.added.length} ~${diff.changed.length} -${diff.removed.length} =${diff.unchangedCount}, ` +
+        `${freshSchemas.length} schemas`
       );
       return next;
     });

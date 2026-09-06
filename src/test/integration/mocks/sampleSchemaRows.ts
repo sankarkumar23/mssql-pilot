@@ -26,6 +26,14 @@ export function objectListingResult(rows: Array<[number, string, string, string,
   );
 }
 
+/** rows: distinct schema names, as returned by the dedicated sys.schemas query. */
+export function schemaListingResult(schemaNames: string[]): SimpleExecuteResult {
+  return makeResult(
+    ['schema_name'],
+    schemaNames.map((name) => [name])
+  );
+}
+
 /** rows: [objectId, columnId, columnName, dataType] — other fields default to plain non-key values. */
 export function columnsResult(rows: Array<[number, number, string, string]>): SimpleExecuteResult {
   return makeResult(
