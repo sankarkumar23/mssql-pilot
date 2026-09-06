@@ -33,6 +33,11 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 | `mssqlPilot.enableCompletionProvider` | `true` | Show MSSQL Pilot suggestions alongside mssql's own IntelliSense |
 | `mssqlPilot.excludedSchemas` | `["sys","INFORMATION_SCHEMA"]` | Extra schemas to exclude from caching |
 
+## Known limitations
+
+- **Old-style comma-separated joins** (`FROM dbo.A a, dbo.B b`) aren't recognized — only `FROM`/`JOIN` keyword-prefixed table references are parsed for alias/column suggestions. Use ANSI `JOIN` syntax for alias-aware completions.
+- **No batch/statement boundary awareness** — aliases are resolved by scanning the whole open document, not just the current `GO`-separated batch or statement. In a file with multiple unrelated queries, an alias from an earlier query could theoretically be suggested in a later one if it happens to reuse the same alias letter.
+
 ## Privacy
 
 MSSQL Pilot reads structure only — table/view/column/procedure/parameter metadata — never your data or query results. It asks for consent once, the first time it would run a background query, before doing anything.
