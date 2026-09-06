@@ -27,6 +27,17 @@ suite('contextParser.buildAliasMap', () => {
     const map = buildAliasMap('SELECT * FROM dbo.Orders');
     assert.strictEqual(map.get('orders'), 'dbo.Orders');
   });
+
+  test('bracket-quoted schema and table are both unwrapped', () => {
+    const map = buildAliasMap('SELECT * FROM [dbo].[Orders] o');
+    assert.strictEqual(map.get('o'), 'dbo.Orders');
+    assert.strictEqual(map.get('orders'), 'dbo.Orders');
+  });
+
+  test('one side bracket-quoted, the other bare, is still handled', () => {
+    assert.strictEqual(buildAliasMap('SELECT * FROM [dbo].Orders').get('orders'), 'dbo.Orders');
+    assert.strictEqual(buildAliasMap('SELECT * FROM dbo.[Orders]').get('orders'), 'dbo.Orders');
+  });
 });
 
 suite('contextParser.getCompletionContext', () => {
@@ -48,10 +59,28 @@ suite('contextParser.getCompletionContext', () => {
     assert.strictEqual(ctx.wordPrefix, '');
   });
 
+  test('bracket-quoted qualifier is unwrapped to its bare name', () => {
+    const ctx = getCompletionContext('SELECT * FROM [dbo].');
+    assert.strictEqual(ctx.qualifier, 'dbo');
+    assert.strictEqual(ctx.wordPrefix, '');
+  });
+
+  test('bracket-quoted qualifier with a partial word typed after it', () => {
+    const ctx = getCompletionContext('SELECT * FROM [dbo].Ord');
+    assert.strictEqual(ctx.qualifier, 'dbo');
+    assert.strictEqual(ctx.wordPrefix, 'Ord');
+  });
+
+  test('bracket-quoted qualifier containing a space', () => {
+    const ctx = getCompletionContext('SELECT * FROM [My Schema].');
+    assert.strictEqual(ctx.qualifier, 'My Schema');
+  });
+
   test('isTableReferencePosition is true directly after FROM', () => {
     assert.strictEqual(getCompletionContext('SELECT * FROM ').isTableReferencePosition, true);
     assert.strictEqual(getCompletionContext('SELECT * FROM dbo.').isTableReferencePosition, true);
     assert.strictEqual(getCompletionContext('SELECT * FROM Ord').isTableReferencePosition, true);
+    assert.strictEqual(getCompletionContext('SELECT * FROM [dbo].').isTableReferencePosition, true);
   });
 
   test('isTableReferencePosition is true directly after JOIN', () => {

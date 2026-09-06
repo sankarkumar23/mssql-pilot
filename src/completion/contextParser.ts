@@ -16,12 +16,16 @@ export interface TableReference {
 
 /** Scans for every `FROM <table> [AS] <alias>` / `JOIN <table> [AS] <alias>` in the text. */
 function parseTableReferences(documentText: string): TableReference[] {
-  const regex = /\b(?:FROM|JOIN)\s+(\[[^\]]+\]|[\w.]+)\s*(?:(AS)\s+(\w+)|(\w+))?/gi;
+  // Each dotted segment may be bare or bracket-quoted, and independently so
+  // (e.g. "[dbo].Orders", "dbo.[Orders]", "[My Schema].[My Table]"). The
+  // alias itself may also be bracket-quoted (e.g. "AS [My Alias]").
+  const regex =
+    /\b(?:FROM|JOIN)\s+((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))*)\s*(?:(AS)\s+(\[[^\]]+\]|\w+)|(\[[^\]]+\]|\w+))?/gi;
   const refs: TableReference[] = [];
   let match: RegExpExecArray | null;
   while ((match = regex.exec(documentText)) !== null) {
     const tableName = match[1].replace(/[[\]]/g, '');
-    const rawAlias = match[3] || match[4];
+    const rawAlias = (match[3] || match[4])?.replace(/[[\]]/g, '');
     const alias = rawAlias && !SQL_KEYWORDS_AFTER_TABLE.has(rawAlias.toLowerCase()) ? rawAlias : undefined;
     refs.push({ tableName, alias });
   }
@@ -80,12 +84,17 @@ export interface CompletionContext {
 
 /** Parses the text of the current line up to the cursor. */
 export function getCompletionContext(lineTextBeforeCursor: string): CompletionContext {
-  const match = /(?:([A-Za-z_][\w]*)\.)?(\w*)$/.exec(lineTextBeforeCursor);
+  // The qualifier may be a bracket-quoted identifier (e.g. "[dbo]." or
+  // "[My Schema].") — brackets are stripped so callers compare against the
+  // same bare names used everywhere else (schema/table names in the cache
+  // are never bracketed).
+  const match = /(?:(\[[^\]]+\]|[A-Za-z_][\w]*)\.)?(\w*)$/.exec(lineTextBeforeCursor);
   const matchStart = match?.index ?? lineTextBeforeCursor.length;
   const textBeforeMatch = lineTextBeforeCursor.slice(0, matchStart);
+  const rawQualifier = match?.[1];
   return {
     wordPrefix: match?.[2] ?? '',
-    qualifier: match?.[1],
+    qualifier: rawQualifier?.replace(/^\[|\]$/g, ''),
     isTableReferencePosition: /\b(?:FROM|JOIN)\s*$/i.test(textBeforeMatch),
   };
 }
