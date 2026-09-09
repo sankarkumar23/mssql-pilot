@@ -19,6 +19,7 @@ const relevanceCheckInFlight = new Set<string>();
 const lastSyncAttemptAt = new Map<string, number>();
 const syncInFlight = new Map<string, Promise<void>>();
 const serverNameByConnectionId = new Map<string, string>();
+let mssqlApiFailureLogged = false;
 
 /** SELECT @@SERVERNAME once per connectionId, then reuse — same pattern mssql-extras uses. */
 async function fetchServerName(api: IMssqlExtensionApi, connectionId: string, connectionUri: string): Promise<string> {
@@ -145,8 +146,14 @@ export async function onSqlDocumentBecameRelevant(
     let api: IMssqlExtensionApi;
     try {
       api = await getMssqlApi();
-    } catch {
-      return; // mssql not installed/active — nothing to do, no error surfaced
+    } catch (err) {
+      // mssql not installed/active/too old — non-fatal, but log once so it's
+      // diagnosable from the Output panel instead of failing completely silently.
+      if (!mssqlApiFailureLogged) {
+        mssqlApiFailureLogged = true;
+        log(`[sync] could not get mssql API, schema caching will not run: ${describeError(err)}`);
+      }
+      return;
     }
 
     const resolved = await resolveKeyForDocument(document, api);

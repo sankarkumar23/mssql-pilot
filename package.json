@@ -2,7 +2,7 @@
   "name": "mssql-pilot",
   "displayName": "MSSQL Pilot",
   "description": "Fast, persistent schema autocomplete for the mssql extension — instant IntelliSense for databases with thousands of tables, views, and stored procedures, even right after reconnecting.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "sankarkumar23",
   "repository": {
     "type": "git",
