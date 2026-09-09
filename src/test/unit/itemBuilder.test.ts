@@ -93,6 +93,10 @@ const salesOrdersTable: TableInfo = {
   ],
 };
 
+// Same table+columns as ordersTable, but a higher objectId than salesOrdersTable's —
+// used to prove schema-preference isn't just an accident of insertion/objectId order.
+const dboOrdersHigherId: TableInfo = { ...ordersTable, objectId: 20 };
+
 function positionAtEndOf(lineText: string): vscode.Position {
   return { line: 0, character: lineText.length } as vscode.Position;
 }
@@ -299,6 +303,42 @@ suite('itemBuilder.buildCompletionItems', () => {
     const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
     const labels = items.map((i) => i.label).sort();
     assert.deepStrictEqual(labels, ['o.RegionId', 'o.SalesOrderId']);
+  });
+
+  test('schema-less alias reference prefers the dbo schema when the same table name exists in another schema too', () => {
+    // salesOrdersTable (objectId 8) sorts before dboOrdersHigherId (objectId 20) —
+    // if this just took the first cached match, it would wrongly pick "sales".
+    const cache = buildCache({ 8: salesOrdersTable, 20: dboOrdersHigherId });
+    const text = 'SELECT o. FROM Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['Id', 'Total']);
+  });
+
+  test('schema-less alias reference falls back to the first cached match when no dbo candidate exists', () => {
+    const marketingOrders: TableInfo = {
+      kind: 'table',
+      objectId: 9,
+      schema: 'marketing',
+      name: 'Orders',
+      modifyDate: 'x',
+      columns: [
+        {
+          name: 'CampaignId', ordinal: 1, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+          isNullable: true, isIdentity: false, isComputed: false, defaultDefinition: null, isPrimaryKey: false,
+        },
+      ],
+    };
+    const cache = buildCache({ 8: salesOrdersTable, 9: marketingOrders });
+    const text = 'SELECT o. FROM Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const labels = items.map((i) => i.label).sort();
+    // "sales" (objectId 8) is the lower objectId, so it's the deterministic first match.
+    assert.deepStrictEqual(labels, ['RegionId', 'SalesOrderId']);
   });
 
   test('table/column names needing quoting are bracket-quoted in insertText, but not in the label', () => {

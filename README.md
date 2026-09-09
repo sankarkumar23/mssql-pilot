@@ -39,6 +39,7 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 
 - **Old-style comma-separated joins** (`FROM dbo.A a, dbo.B b`) aren't recognized — only `FROM`/`JOIN` keyword-prefixed table references are parsed for alias/column suggestions. Use ANSI `JOIN` syntax for alias-aware completions.
 - **No batch/statement boundary awareness** — aliases are resolved by scanning the whole open document, not just the current `GO`-separated batch or statement. In a file with multiple unrelated queries, an alias from an earlier query could theoretically be suggested in a later one if it happens to reuse the same alias letter.
+- **Schema-less table references are a best-effort guess when a name is ambiguous** — if the same table name exists in more than one schema (e.g. `dbo.Orders` and `sales.Orders`) and the query references it without a schema (`FROM Orders o`), Pilot prefers the `dbo` copy if one exists, otherwise falls back to whichever match was cached first. This can differ from what SQL Server itself resolves to for logins whose default schema isn't `dbo`. Qualify the table with its schema (`FROM sales.Orders o`) to get exact, unambiguous column suggestions.
 
 ## Privacy
 

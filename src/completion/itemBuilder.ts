@@ -136,13 +136,20 @@ function columnsOf(obj: SchemaObject): ColumnInfo[] {
   return obj.tableColumns ?? [];
 }
 
+const DEFAULT_SCHEMA = 'dbo';
+
 /**
  * Resolves a FROM/JOIN table reference (as written — possibly schema-qualified)
  * to its cached SchemaObject. When the reference names an explicit schema,
  * that schema is honored exactly — it never falls back to a same-named table
  * in a different schema, which would silently resolve to the wrong columns.
- * A schema-less reference is inherently ambiguous across schemas; the first
- * cached match by bare name is used, same as before.
+ *
+ * A schema-less reference is genuinely ambiguous when the same name exists in
+ * more than one schema — SQL Server itself resolves it via the connection's
+ * default schema, which is "dbo" for the overwhelming majority of logins, so
+ * a "dbo" candidate is preferred when there is one. This is a heuristic, not
+ * a guarantee: a login with a non-dbo default schema can still see the wrong
+ * table suggested here.
  */
 function resolveByBareName(index: SchemaIndex, tableName: string): SchemaObject | undefined {
   const segments = tableName.split('.');
@@ -152,9 +159,11 @@ function resolveByBareName(index: SchemaIndex, tableName: string): SchemaObject 
   if (!candidates) return undefined;
 
   const schema = segments.pop()?.toLowerCase();
-  if (!schema) return candidates[0];
+  if (schema) {
+    return candidates.find((c) => c.schema.toLowerCase() === schema);
+  }
 
-  return candidates.find((c) => c.schema.toLowerCase() === schema);
+  return candidates.find((c) => c.schema.toLowerCase() === DEFAULT_SCHEMA) ?? candidates[0];
 }
 
 /**
