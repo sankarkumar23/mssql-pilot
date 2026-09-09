@@ -75,6 +75,24 @@ const customersTable: TableInfo = {
   ],
 };
 
+const salesOrdersTable: TableInfo = {
+  kind: 'table',
+  objectId: 8,
+  schema: 'sales',
+  name: 'Orders',
+  modifyDate: 'x',
+  columns: [
+    {
+      name: 'SalesOrderId', ordinal: 1, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+      isNullable: false, isIdentity: true, isComputed: false, defaultDefinition: null, isPrimaryKey: true,
+    },
+    {
+      name: 'RegionId', ordinal: 2, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+      isNullable: true, isIdentity: false, isComputed: false, defaultDefinition: null, isPrimaryKey: false,
+    },
+  ],
+};
+
 function positionAtEndOf(lineText: string): vscode.Position {
   return { line: 0, character: lineText.length } as vscode.Position;
 }
@@ -252,6 +270,35 @@ suite('itemBuilder.buildCompletionItems', () => {
     const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
     const labels = items.map((i) => i.label).sort();
     assert.deepStrictEqual(labels, ['Id', 'Total']);
+  });
+
+  test('alias qualifier honors the explicit schema when the same table name exists in another schema', () => {
+    const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
+    const text = 'SELECT o. FROM sales.Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['RegionId', 'SalesOrderId']);
+  });
+
+  test('alias qualifier still resolves the dbo-schema table when both schemas define the same table name', () => {
+    const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
+    const text = 'SELECT o. FROM dbo.Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['Id', 'Total']);
+  });
+
+  test('no qualifier in WHERE: alias.column for a joined table honors its explicit schema, not a same-named table elsewhere', () => {
+    const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
+    const text = 'SELECT * FROM sales.Orders o WHERE ';
+    const doc = fakeDocument(text, text);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
+    const labels = items.map((i) => i.label).sort();
+    assert.deepStrictEqual(labels, ['o.RegionId', 'o.SalesOrderId']);
   });
 
   test('table/column names needing quoting are bracket-quoted in insertText, but not in the label', () => {

@@ -136,10 +136,25 @@ function columnsOf(obj: SchemaObject): ColumnInfo[] {
   return obj.tableColumns ?? [];
 }
 
+/**
+ * Resolves a FROM/JOIN table reference (as written — possibly schema-qualified)
+ * to its cached SchemaObject. When the reference names an explicit schema,
+ * that schema is honored exactly — it never falls back to a same-named table
+ * in a different schema, which would silently resolve to the wrong columns.
+ * A schema-less reference is inherently ambiguous across schemas; the first
+ * cached match by bare name is used, same as before.
+ */
 function resolveByBareName(index: SchemaIndex, tableName: string): SchemaObject | undefined {
-  const lastSegment = tableName.split('.').pop()?.toLowerCase();
-  if (!lastSegment) return undefined;
-  return index.byName.get(lastSegment)?.[0];
+  const segments = tableName.split('.');
+  const bareName = segments.pop()?.toLowerCase();
+  if (!bareName) return undefined;
+  const candidates = index.byName.get(bareName);
+  if (!candidates) return undefined;
+
+  const schema = segments.pop()?.toLowerCase();
+  if (!schema) return candidates[0];
+
+  return candidates.find((c) => c.schema.toLowerCase() === schema);
 }
 
 /**
