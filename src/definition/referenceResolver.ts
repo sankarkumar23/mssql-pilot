@@ -37,12 +37,15 @@ export function resolveReferenceAtWord(
   if (!word) return undefined;
 
   const ctx = getCompletionContext(textUpToWordEnd);
+  const rawReferenceName = ctx.qualifier
+    ? `${ctx.rawQualifier ?? ctx.qualifier}.${ctx.rawWordPrefix || word}`
+    : (ctx.rawWordPrefix || word);
 
   // "FROM dbo.Orders" / "JOIN Orders" — the word under the cursor is the
   // object being declared, not an alias use, so there's nothing to gain from
   // a full-document alias scan.
   if (ctx.isTableReferencePosition) {
-    const target = resolveByBareName(index, ctx.qualifier ? `${ctx.qualifier}.${word}` : word);
+    const target = resolveByBareName(index, rawReferenceName);
     return target ? { kind: 'object', target } : undefined;
   }
 
@@ -63,7 +66,7 @@ export function resolveReferenceAtWord(
     }
     // Not a known alias — treat the qualifier as a schema name instead
     // (e.g. "dbo.Orders", "EXEC dbo.MyProc", "SELECT dbo.MyFunc()").
-    const target = resolveByBareName(index, `${ctx.qualifier}.${word}`);
+    const target = resolveByBareName(index, rawReferenceName);
     return target ? { kind: 'object', target } : undefined;
   }
 
@@ -75,6 +78,6 @@ export function resolveReferenceAtWord(
     if (target) return { kind: 'object', target };
   }
 
-  const target = resolveByBareName(index, word);
+  const target = resolveByBareName(index, rawReferenceName);
   return target ? { kind: 'object', target } : undefined;
 }

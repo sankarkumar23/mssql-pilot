@@ -1,3 +1,5 @@
+import { splitMultipartIdentifier, unquoteIdentifierIfNeeded } from '../utils/sqlIdentifier';
+
 /**
  * Pure string-in/data-out parsing helpers. No vscode dependency, no I/O —
  * fully unit-testable standalone.
@@ -22,13 +24,13 @@ function parseTableReferences(documentText: string): TableReference[] {
   // (e.g. "[dbo].Orders", "dbo.[Orders]", "[My Schema].[My Table]"). The
   // alias itself may also be bracket-quoted (e.g. "AS [My Alias]").
   const regex =
-    /\b(?:FROM|JOIN)\s+((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+))*)\s*(?:(AS)\s+(\[[^\]]+\]|\w+)|(\[[^\]]+\]|\w+))?/gi;
+    /\b(?:FROM|JOIN)\s+((?:\[(?:[^\]]|\]\])+\]|\w+)(?:\.(?:\[(?:[^\]]|\]\])+\]|\w+))*)\s*(?:(AS)\s+(\[(?:[^\]]|\]\])+\]|\w+)|(\[(?:[^\]]|\]\])+\]|\w+))?/gi;
   const refs: TableReference[] = [];
   let match: RegExpExecArray | null;
   while ((match = regex.exec(documentText)) !== null) {
-    const tableName = match[1].replace(/[[\]]/g, '');
+    const tableName = match[1];
     const rawAliasAsMatched = match[3] || match[4]; // brackets not yet stripped — needed for offset math below
-    const alias = rawAliasAsMatched?.replace(/[[\]]/g, '');
+    const alias = rawAliasAsMatched ? unquoteIdentifierIfNeeded(rawAliasAsMatched) : undefined;
     if (alias && !SQL_KEYWORDS_AFTER_TABLE.has(alias.toLowerCase())) {
       // Nothing in the pattern follows the alias group, so when it matched,
       // it's always the exact tail of the whole match — no need for the
@@ -68,7 +70,7 @@ function isAliasStillBeingTyped(ref: TableReference, cursorOffset: number | unde
 export function buildAliasMap(documentText: string, cursorOffset?: number): Map<string, string> {
   const map = new Map<string, string>();
   for (const ref of parseTableReferences(documentText)) {
-    const lastSegment = ref.tableName.split('.').pop();
+    const lastSegment = splitMultipartIdentifier(ref.tableName).map(unquoteIdentifierIfNeeded).pop();
     if (lastSegment) {
       map.set(lastSegment.toLowerCase(), ref.tableName);
     }
@@ -118,8 +120,12 @@ export function collectAliasedTableReferences(
 export interface CompletionContext {
   /** The partial identifier being typed, right before the cursor. */
   wordPrefix: string;
+  /** The raw identifier text being typed, before bracket-unquoting. */
+  rawWordPrefix: string;
   /** The identifier before a preceding '.', if any (an alias, table name, or schema name). */
   qualifier: string | undefined;
+  /** The raw qualifier text, before bracket-unquoting. */
+  rawQualifier: string | undefined;
   /** True when the identifier being typed directly follows FROM/JOIN — naming a table, not referencing an alias. */
   isTableReferencePosition: boolean;
   /**
@@ -141,15 +147,16 @@ function escapeRegExp(text: string): string {
 
 /** Parses the text of the current line up to the cursor. */
 export function getCompletionContext(lineTextBeforeCursor: string): CompletionContext {
-  // The qualifier may be a bracket-quoted identifier (e.g. "[dbo]." or
-  // "[My Schema].") — brackets are stripped so callers compare against the
-  // same bare names used everywhere else (schema/table names in the cache
-  // are never bracketed).
-  const match = /(?:(\[[^\]]+\]|[A-Za-z_][\w]*)\.)?(\w*)$/.exec(lineTextBeforeCursor);
+  // The qualifier and the current identifier may each be bare or
+  // bracket-quoted. For go-to-definition, supporting a COMPLETE
+  // bracket-quoted current identifier matters for names like
+  // S4RAW.[/DMBE/TM_DEALHDR].
+  const match = /(?:(\[(?:[^\]]|\]\])+\]|[A-Za-z_][\w]*)\.)?((?:\[(?:[^\]]|\]\])+\])|\w*)$/.exec(lineTextBeforeCursor);
   const matchStart = match?.index ?? lineTextBeforeCursor.length;
   const textBeforeMatch = lineTextBeforeCursor.slice(0, matchStart);
   const rawQualifier = match?.[1];
-  const qualifier = rawQualifier?.replace(/^\[|\]$/g, '');
+  const qualifier = rawQualifier ? unquoteIdentifierIfNeeded(rawQualifier) : undefined;
+  const rawCurrent = match?.[2] ?? '';
 
   let qualifierJustDeclared = false;
   if (qualifier && rawQualifier) {
@@ -159,7 +166,7 @@ export function getCompletionContext(lineTextBeforeCursor: string): CompletionCo
     const textThroughQualifier = lineTextBeforeCursor.slice(0, matchStart + rawQualifier.length);
     const escapedAlias = escapeRegExp(qualifier);
     const declarationPattern = new RegExp(
-      `\\b(?:FROM|JOIN)\\s+(?:\\[[^\\]]+\\]|\\w+)(?:\\.(?:\\[[^\\]]+\\]|\\w+))*` +
+      `\\b(?:FROM|JOIN)\\s+(?:\\[(?:[^\\]]|\\]\\])+\\]|\\w+)(?:\\.(?:\\[(?:[^\\]]|\\]\\])+\\]|\\w+))*` +
       `\\s+(?:AS\\s+)?(?:\\[${escapedAlias}\\]|${escapedAlias})\\s*$`,
       'i'
     );
@@ -167,8 +174,10 @@ export function getCompletionContext(lineTextBeforeCursor: string): CompletionCo
   }
 
   return {
-    wordPrefix: match?.[2] ?? '',
+    wordPrefix: rawCurrent ? unquoteIdentifierIfNeeded(rawCurrent) : '',
+    rawWordPrefix: rawCurrent,
     qualifier,
+    rawQualifier,
     isTableReferencePosition: /\b(?:FROM|JOIN)\s*$/i.test(textBeforeMatch),
     qualifierJustDeclared,
   };

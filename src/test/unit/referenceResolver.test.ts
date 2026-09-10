@@ -58,10 +58,37 @@ const myProc: RoutineInfo = {
   ],
 };
 
+const specialCharTable: TableInfo = {
+  kind: 'table',
+  objectId: 10,
+  schema: 'S4RAW',
+  name: '/DMBE/TM_DEALHDR',
+  modifyDate: 'x',
+  columns: [
+    {
+      name: '/DMBE/ID', ordinal: 1, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+      isNullable: false, isIdentity: false, isComputed: false, defaultDefinition: null, isPrimaryKey: true,
+    },
+  ],
+};
+
+const dottedNameTable: TableInfo = {
+  kind: 'table',
+  objectId: 11,
+  schema: 'S4RAW',
+  name: 'TM.DEALHDR',
+  modifyDate: 'x',
+  columns: [],
+};
+
 /** Resolves for the LAST occurrence of `word` in `text` (single-line fixtures only). */
 function resolveAt(text: string, word: string, cache: DatabaseSchemaCache) {
   const index = getSchemaIndex(cache);
-  const end = text.lastIndexOf(word) + word.length;
+  const start = text.lastIndexOf(word);
+  let end = start + word.length;
+  if (start > 0 && text[start - 1] === '[' && text[end] === ']') {
+    end += 1;
+  }
   assert.ok(end >= word.length, `"${word}" not found in "${text}"`);
   return resolveReferenceAtWord(() => text, text.slice(0, end), word, index);
 }
@@ -116,6 +143,22 @@ suite('referenceResolver.resolveReferenceAtWord', () => {
     assert.strictEqual(result?.kind, 'object');
     assert.strictEqual(result?.target.kind, 'procedure');
     assert.strictEqual(result?.target.name, 'MyProc');
+  });
+
+  test('a schema-qualified bracket-quoted special-character table name resolves to the table object', () => {
+    const cache = buildCache({ 10: specialCharTable });
+    const result = resolveAt('SELECT * FROM S4RAW.[/DMBE/TM_DEALHDR]', '/DMBE/TM_DEALHDR', cache);
+    assert.strictEqual(result?.kind, 'object');
+    assert.strictEqual(result?.target.schema, 'S4RAW');
+    assert.strictEqual(result?.target.name, '/DMBE/TM_DEALHDR');
+  });
+
+  test('a bracket-quoted identifier containing dots stays a single object name', () => {
+    const cache = buildCache({ 11: dottedNameTable });
+    const result = resolveAt('SELECT * FROM S4RAW.[TM.DEALHDR]', 'TM.DEALHDR', cache);
+    assert.strictEqual(result?.kind, 'object');
+    assert.strictEqual(result?.target.schema, 'S4RAW');
+    assert.strictEqual(result?.target.name, 'TM.DEALHDR');
   });
 
   test('an unresolvable identifier returns undefined', () => {

@@ -51,6 +51,7 @@ class CompletionItem {
   detail?: string;
   documentation?: unknown;
   insertText?: string | InstanceType<typeof SnippetString>;
+  command?: unknown;
   constructor(
     public label: string,
     public kind?: CompletionItemKind
@@ -106,6 +107,10 @@ class Disposable {
   }
 }
 
+class WorkspaceEdit {
+  replace(..._args: unknown[]): void {}
+}
+
 const configStore = new Map<string, Record<string, unknown>>();
 
 function getConfiguration(section: string) {
@@ -126,6 +131,7 @@ const vscodeStub: any = {
   CompletionItemKind,
   MarkdownString,
   SnippetString,
+  WorkspaceEdit,
   TextEdit,
   Disposable,
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
@@ -164,6 +170,8 @@ const vscodeStub: any = {
     getConfiguration,
     onDidOpenTextDocument: () => ({ dispose() {} }),
     onDidCloseTextDocument: () => ({ dispose() {} }),
+    onDidChangeTextDocument: () => ({ dispose() {} }),
+    applyEdit: async () => true,
     fs: {
       readFile: (uri: Uri) => fsp.readFile(uri.fsPath),
       writeFile: (uri: Uri, content: Uint8Array) => fsp.writeFile(uri.fsPath, Buffer.from(content)),
