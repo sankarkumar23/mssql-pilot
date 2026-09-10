@@ -14,6 +14,7 @@ import {
   buildForeignKeysQuery,
   buildIndexesQuery,
   buildObjectDefinitionQuery,
+  DependentViewInfo,
   extractCheckConstraints,
   extractDependentViews,
   extractForeignKeys,
@@ -21,6 +22,16 @@ import {
   extractObjectDefinition,
 } from '../cache/schemaQueries';
 import { log, describeError } from '../utils/outputChannel';
+import { TIMED_OUT, withTimeout } from '../utils/withTimeout';
+
+/**
+ * sys.dm_sql_referencing_entities resolves a full dependency graph rather
+ * than doing a simple indexed lookup, and is well known to get slow — into
+ * multiple seconds — on databases with many thousands of objects. Bounding
+ * just this one query means a slow dependency graph never costs the (always
+ * fast, indexed-by-object_id) index/FK/check-constraint info alongside it.
+ */
+const DEPENDENT_VIEWS_TIMEOUT_MS = 5000;
 
 export const DEFINITION_SCHEME = 'mssql-pilot-def';
 
@@ -67,12 +78,24 @@ async function fetchTableExtras(schema: string, name: string, objectId: number):
       const indexResult = await api.connectionSharing.executeSimpleQuery(uri, buildIndexesQuery(objectId));
       const fkResult = await api.connectionSharing.executeSimpleQuery(uri, buildForeignKeysQuery(objectId));
       const checkResult = await api.connectionSharing.executeSimpleQuery(uri, buildCheckConstraintsQuery(objectId));
-      const dependentViewsResult = await api.connectionSharing.executeSimpleQuery(uri, buildDependentViewsQuery(schema, name));
+
+      const dependentViewsResult = await withTimeout(
+        api.connectionSharing.executeSimpleQuery(uri, buildDependentViewsQuery(schema, name)),
+        DEPENDENT_VIEWS_TIMEOUT_MS
+      );
+      let dependentViews: DependentViewInfo[];
+      if (dependentViewsResult === TIMED_OUT) {
+        log(`[definition] dependent-views lookup for ${schema}.${name} timed out after ${DEPENDENT_VIEWS_TIMEOUT_MS}ms (large schema?) — omitted, everything else still shown`);
+        dependentViews = [];
+      } else {
+        dependentViews = extractDependentViews(dependentViewsResult);
+      }
+
       return {
         indexes: extractIndexes(indexResult),
         foreignKeys: extractForeignKeys(fkResult),
         checkConstraints: extractCheckConstraints(checkResult),
-        dependentViews: extractDependentViews(dependentViewsResult),
+        dependentViews,
       };
     });
   } catch (err) {
