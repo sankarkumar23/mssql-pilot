@@ -259,6 +259,117 @@ export interface CheckConstraintInfo {
   isDisabled: boolean;
 }
 
+export interface DefinitionExtras {
+  indexes: IndexInfo[];
+  foreignKeys: ForeignKeyInfo[];
+  checkConstraints: CheckConstraintInfo[];
+}
+
+/**
+ * One tagged rowset for all table/view "extras" metadata. mssql's public
+ * connection-sharing API only gives us the FIRST result set from a batch, so
+ * returning a single unioned result lets us collapse three expensive
+ * executeSimpleQuery round-trips (indexes, FKs, checks) into one.
+ */
+export function buildDefinitionExtrasQuery(objectId: number): string {
+  return `
+SELECT row_type, index_id, index_name, is_primary_key, is_unique_constraint, is_unique, is_disabled,
+       column_name, is_descending_key, is_included_column,
+       fk_name, parent_column, referenced_schema, referenced_table, referenced_column,
+       check_name, check_definition, check_is_disabled
+FROM (
+  SELECT
+    1 AS row_group,
+    i.name AS sort_name,
+    ic.key_ordinal AS sort_2,
+    ic.index_column_id AS sort_3,
+    'index' AS row_type,
+    i.index_id,
+    i.name AS index_name,
+    i.is_primary_key,
+    i.is_unique_constraint,
+    i.is_unique,
+    i.is_disabled,
+    c.name AS column_name,
+    ic.is_descending_key,
+    ic.is_included_column,
+    CAST(NULL AS sysname) AS fk_name,
+    CAST(NULL AS sysname) AS parent_column,
+    CAST(NULL AS sysname) AS referenced_schema,
+    CAST(NULL AS sysname) AS referenced_table,
+    CAST(NULL AS sysname) AS referenced_column,
+    CAST(NULL AS sysname) AS check_name,
+    CAST(NULL AS nvarchar(max)) AS check_definition,
+    CAST(NULL AS bit) AS check_is_disabled
+  FROM sys.indexes i
+  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+  JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+  WHERE i.object_id = ${objectId} AND i.index_id > 0
+
+  UNION ALL
+
+  SELECT
+    2 AS row_group,
+    fk.name AS sort_name,
+    fkc.constraint_column_id AS sort_2,
+    0 AS sort_3,
+    'foreign_key' AS row_type,
+    CAST(NULL AS int) AS index_id,
+    CAST(NULL AS sysname) AS index_name,
+    CAST(NULL AS bit) AS is_primary_key,
+    CAST(NULL AS bit) AS is_unique_constraint,
+    CAST(NULL AS bit) AS is_unique,
+    CAST(NULL AS bit) AS is_disabled,
+    CAST(NULL AS sysname) AS column_name,
+    CAST(NULL AS bit) AS is_descending_key,
+    CAST(NULL AS bit) AS is_included_column,
+    fk.name AS fk_name,
+    pc.name AS parent_column,
+    rs.name AS referenced_schema,
+    rt.name AS referenced_table,
+    rc.name AS referenced_column,
+    CAST(NULL AS sysname) AS check_name,
+    CAST(NULL AS nvarchar(max)) AS check_definition,
+    CAST(NULL AS bit) AS check_is_disabled
+  FROM sys.foreign_keys fk
+  JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+  JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+  JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+  JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+  JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+  WHERE fk.parent_object_id = ${objectId}
+
+  UNION ALL
+
+  SELECT
+    3 AS row_group,
+    cc.name AS sort_name,
+    0 AS sort_2,
+    0 AS sort_3,
+    'check_constraint' AS row_type,
+    CAST(NULL AS int) AS index_id,
+    CAST(NULL AS sysname) AS index_name,
+    CAST(NULL AS bit) AS is_primary_key,
+    CAST(NULL AS bit) AS is_unique_constraint,
+    CAST(NULL AS bit) AS is_unique,
+    CAST(NULL AS bit) AS is_disabled,
+    CAST(NULL AS sysname) AS column_name,
+    CAST(NULL AS bit) AS is_descending_key,
+    CAST(NULL AS bit) AS is_included_column,
+    CAST(NULL AS sysname) AS fk_name,
+    CAST(NULL AS sysname) AS parent_column,
+    CAST(NULL AS sysname) AS referenced_schema,
+    CAST(NULL AS sysname) AS referenced_table,
+    CAST(NULL AS sysname) AS referenced_column,
+    cc.name AS check_name,
+    cc.definition AS check_definition,
+    cc.is_disabled AS check_is_disabled
+  FROM sys.check_constraints cc
+  WHERE cc.parent_object_id = ${objectId}
+) AS rows
+ORDER BY row_group, sort_name, sort_2, sort_3;`;
+}
+
 /**
  * Indexes, PK, and unique constraints all live in sys.indexes — one query
  * covers all three. Like the routine-body fetch above, this is on-demand
@@ -277,10 +388,10 @@ WHERE i.object_id = ${objectId} AND i.index_id > 0
 ORDER BY i.index_id, ic.key_ordinal, ic.index_column_id;`;
 }
 
-export function extractIndexes(result: SimpleExecuteResult): IndexInfo[] {
+function extractIndexesFromRows(rows: Array<Record<string, string | null>>): IndexInfo[] {
   const byId = new Map<string, IndexInfo>();
   const order: string[] = [];
-  for (const r of rowsToObjects(result)) {
+  for (const r of rows) {
     const id = r.index_id ?? '';
     let info = byId.get(id);
     if (!info) {
@@ -302,6 +413,10 @@ export function extractIndexes(result: SimpleExecuteResult): IndexInfo[] {
   return order.map((id) => byId.get(id)!);
 }
 
+export function extractIndexes(result: SimpleExecuteResult): IndexInfo[] {
+  return extractIndexesFromRows(rowsToObjects(result));
+}
+
 export function buildForeignKeysQuery(objectId: number): string {
   return `
 SELECT fk.name AS fk_name, pc.name AS parent_column,
@@ -316,10 +431,10 @@ WHERE fk.parent_object_id = ${objectId}
 ORDER BY fk.name, fkc.constraint_column_id;`;
 }
 
-export function extractForeignKeys(result: SimpleExecuteResult): ForeignKeyInfo[] {
+function extractForeignKeysFromRows(rows: Array<Record<string, string | null>>): ForeignKeyInfo[] {
   const byName = new Map<string, ForeignKeyInfo>();
   const order: string[] = [];
-  for (const r of rowsToObjects(result)) {
+  for (const r of rows) {
     const name = r.fk_name ?? '';
     let info = byName.get(name);
     if (!info) {
@@ -337,6 +452,10 @@ export function extractForeignKeys(result: SimpleExecuteResult): ForeignKeyInfo[
   return order.map((name) => byName.get(name)!);
 }
 
+export function extractForeignKeys(result: SimpleExecuteResult): ForeignKeyInfo[] {
+  return extractForeignKeysFromRows(rowsToObjects(result));
+}
+
 export function buildCheckConstraintsQuery(objectId: number): string {
   return `
 SELECT cc.name, cc.definition, cc.is_disabled
@@ -345,12 +464,33 @@ WHERE cc.parent_object_id = ${objectId}
 ORDER BY cc.name;`;
 }
 
-export function extractCheckConstraints(result: SimpleExecuteResult): CheckConstraintInfo[] {
-  return rowsToObjects(result).map((r) => ({
+function extractCheckConstraintsFromRows(rows: Array<Record<string, string | null>>): CheckConstraintInfo[] {
+  return rows.map((r) => ({
     name: r.name ?? '',
     definition: r.definition,
     isDisabled: toBool(r.is_disabled),
   }));
+}
+
+export function extractCheckConstraints(result: SimpleExecuteResult): CheckConstraintInfo[] {
+  return extractCheckConstraintsFromRows(rowsToObjects(result));
+}
+
+export function extractDefinitionExtras(result: SimpleExecuteResult): DefinitionExtras {
+  const rows = rowsToObjects(result);
+  return {
+    indexes: extractIndexesFromRows(rows.filter((r) => r.row_type === 'index')),
+    foreignKeys: extractForeignKeysFromRows(rows.filter((r) => r.row_type === 'foreign_key')),
+    checkConstraints: extractCheckConstraintsFromRows(
+      rows
+        .filter((r) => r.row_type === 'check_constraint')
+        .map((r) => ({
+          name: r.check_name,
+          definition: r.check_definition,
+          is_disabled: r.check_is_disabled,
+        }))
+    ),
+  };
 }
 
 export function mapSchemaListingRows(result: SimpleExecuteResult): string[] {

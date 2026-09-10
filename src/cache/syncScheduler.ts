@@ -5,7 +5,12 @@ import { withSharedConnection } from '../utils/sharedConnection';
 import { log, describeError } from '../utils/outputChannel';
 import { isFeatureEnabled, getSyncThrottleMs, getPollIntervalMs } from '../utils/config';
 import { ServerDatabaseKey, buildCacheKey } from './cacheKey';
-import { rememberKeyForDocument, getRememberedKeyForDocument, forgetDocument } from './documentKeyTracker';
+import {
+  rememberKeyForDocument,
+  rememberConnectionIdForDocument,
+  getRememberedKeyForDocument,
+  forgetDocument,
+} from './documentKeyTracker';
 import { getMemoryCache, setMemoryCache, hasMemoryCache } from './memoryCache';
 import { readDatabaseSchemaCache, writeDatabaseSchemaCache, upsertManifestEntry } from './diskStore';
 import { emptyDatabaseSchemaCache } from './schemaTypes';
@@ -170,6 +175,7 @@ export async function onSqlDocumentBecameRelevant(
     if (!resolved) return;
 
     rememberKeyForDocument(document.uri, resolved.key);
+    rememberConnectionIdForDocument(document.uri, resolved.connectionId);
     await ensureSyncStarted(resolved.key, resolved.connectionId, api, context);
   } catch (err) {
     log(`[sync] onSqlDocumentBecameRelevant failed (non-fatal): ${describeError(err)}`);

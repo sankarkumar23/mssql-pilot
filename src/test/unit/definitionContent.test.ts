@@ -72,15 +72,20 @@ suite('definitionContent.formatTableDefinition', () => {
     assert.match(text, /fetched live from the connected database/);
   });
 
-  test('with live extras but no dependent views, the trailing comment block is omitted', () => {
+  test('with live extras but no dependent views, it says so explicitly', () => {
     const { text } = formatTableDefinition(ordersTable, { indexes: [], foreignKeys: [], checkConstraints: [], dependentViews: [] });
-    assert.doesNotMatch(text, /Views depending on/);
+    assert.match(text, /No dependent views found for dbo\.Orders\./);
   });
 
   test('with dependentViews still "loading", shows a placeholder instead of waiting or omitting it silently', () => {
     const { text } = formatTableDefinition(ordersTable, { indexes: [], foreignKeys: [], checkConstraints: [], dependentViews: 'loading' });
     assert.match(text, /Checking for dependent views…/);
     assert.doesNotMatch(text, /Views depending on/);
+  });
+
+  test('with dependentViews unavailable, says the lookup failed or timed out', () => {
+    const { text } = formatTableDefinition(ordersTable, { indexes: [], foreignKeys: [], checkConstraints: [], dependentViews: 'unavailable' });
+    assert.match(text, /Dependent views unavailable \(lookup failed or timed out\)\./);
   });
 
   test('a schema/table/column name needing quoting is bracket-quoted in the rendered SQL', () => {

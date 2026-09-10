@@ -1,24 +1,27 @@
 import * as vscode from 'vscode';
-import { getRememberedKeyForDocument, resolveActiveKey, EXTENSION_ID } from '../cache/syncScheduler';
+import { getRememberedConnectionIdForDocument, getRememberedKeyForDocument, rememberConnectionIdForDocument } from '../cache/documentKeyTracker';
+import { EXTENSION_ID } from '../cache/syncScheduler';
 import { buildCacheKey } from '../cache/cacheKey';
 import { getMemoryCache } from '../cache/memoryCache';
 import { getSchemaIndex } from '../cache/schemaIndex';
 import { RoutineInfo, TableInfo, ViewInfo } from '../cache/schemaTypes';
-import { formatRoutineBody, formatRoutineStub, formatTableDefinition, formatViewDefinition, TableExtras } from './definitionContent';
+import {
+  DependentViewsState,
+  formatRoutineBody,
+  formatRoutineStub,
+  formatTableDefinition,
+  formatViewDefinition,
+  TableExtras,
+} from './definitionContent';
 import { resolveReferenceAtWord } from './referenceResolver';
 import { getMssqlApi } from '../utils/mssqlApi';
 import { withSharedConnection } from '../utils/sharedConnection';
 import {
-  buildCheckConstraintsQuery,
+  buildDefinitionExtrasQuery,
   buildDependentViewsQuery,
-  buildForeignKeysQuery,
-  buildIndexesQuery,
   buildObjectDefinitionQuery,
-  DependentViewInfo,
-  extractCheckConstraints,
+  extractDefinitionExtras,
   extractDependentViews,
-  extractForeignKeys,
-  extractIndexes,
   extractObjectDefinition,
 } from '../cache/schemaQueries';
 import { log, describeError } from '../utils/outputChannel';
@@ -64,9 +67,47 @@ class DefinitionContentProvider implements vscode.TextDocumentContentProvider {
 }
 
 const contentProvider = new DefinitionContentProvider();
+const EMPTY_LIVE_EXTRAS: Omit<TableExtras, 'dependentViews'> = {
+  indexes: [],
+  foreignKeys: [],
+  checkConstraints: [],
+};
 
 function isRoutineKind(kind: string): kind is RoutineInfo['kind'] {
   return kind === 'procedure' || kind === 'scalarFunction' || kind === 'tableFunction';
+}
+
+function updateOpenDefinition(uri: vscode.Uri, content: string): void {
+  contentByUri.set(uri.toString(), content);
+  contentProvider.announceChange(uri);
+}
+
+/**
+ * Reads a best-effort connection id for the active SQL document without
+ * forcing a shared-connection lease. The remembered value is the fast path;
+ * querying mssql directly is only a fallback for the first definition jump
+ * before the poller/activation path has populated the remembered context.
+ */
+async function resolveDefinitionConnectionId(document: vscode.TextDocument): Promise<string | undefined> {
+  const remembered = getRememberedConnectionIdForDocument(document.uri);
+  if (remembered) return remembered;
+
+  const activeEditor = vscode.window.activeTextEditor;
+  if (!activeEditor || activeEditor.document.uri.toString() !== document.uri.toString()) {
+    return undefined;
+  }
+
+  try {
+    const api = await getMssqlApi();
+    const connectionId = await api.connectionSharing.getActiveEditorConnectionId(EXTENSION_ID);
+    if (connectionId) {
+      rememberConnectionIdForDocument(document.uri, connectionId);
+    }
+    return connectionId;
+  } catch (err) {
+    log(`[definition] failed to resolve active connection id (non-fatal, falling back to cache-only definition): ${describeError(err)}`);
+    return undefined;
+  }
 }
 
 /** Used for both routine bodies and view definitions — OBJECT_DEFINITION() works identically for either. */
@@ -88,18 +129,8 @@ async function fetchFastExtras(connectionId: string, objectId: number): Promise<
   try {
     const api = await getMssqlApi();
     return await withSharedConnection(api.connectionSharing, EXTENSION_ID, connectionId, async (uri) => {
-      // Sequential, not Promise.all: a single shared connection may not
-      // support genuinely concurrent commands, and this only runs once per
-      // F12 press, not on every keystroke — a few sequential round trips are
-      // cheap here.
-      const indexResult = await api.connectionSharing.executeSimpleQuery(uri, buildIndexesQuery(objectId));
-      const fkResult = await api.connectionSharing.executeSimpleQuery(uri, buildForeignKeysQuery(objectId));
-      const checkResult = await api.connectionSharing.executeSimpleQuery(uri, buildCheckConstraintsQuery(objectId));
-      return {
-        indexes: extractIndexes(indexResult),
-        foreignKeys: extractForeignKeys(fkResult),
-        checkConstraints: extractCheckConstraints(checkResult),
-      };
+      const result = await api.connectionSharing.executeSimpleQuery(uri, buildDefinitionExtrasQuery(objectId));
+      return extractDefinitionExtras(result);
     });
   } catch (err) {
     log(`[definition] failed to fetch indexes/keys/constraints for object ${objectId} (non-fatal, falling back to cached columns only): ${describeError(err)}`);
@@ -112,20 +143,19 @@ async function fetchFastExtras(connectionId: string, objectId: number): Promise<
  * settles (resolved, timed out, or failed), rewrites the already-open
  * definition tab's content via `rerender` and tells the content provider to
  * refresh it. `connectionId` must have been resolved BEFORE this point —
- * calling resolveActiveKey() from inside this background task would fail,
- * since by the time it runs, VS Code has already switched the active editor
- * to the virtual definition document itself, which isn't a live mssql
+ * once the definition tab is open, VS Code has already switched the active
+ * editor to the virtual definition document itself, which isn't a live mssql
  * connection.
  */
 function scheduleDependentViewsUpdate(
   connectionId: string,
   schema: string,
   name: string,
-  uri: vscode.Uri,
-  rerender: (dependentViews: DependentViewInfo[]) => string
+  onUpdate: (dependentViews: DependentViewsState) => void
 ): void {
+  const startedAt = Date.now();
   (async () => {
-    let dependentViews: DependentViewInfo[] = [];
+    let dependentViews: DependentViewsState = 'unavailable';
     try {
       const api = await getMssqlApi();
       const result = await withTimeout(
@@ -138,12 +168,83 @@ function scheduleDependentViewsUpdate(
         log(`[definition] dependent-views lookup for ${schema}.${name} timed out after ${DEPENDENT_VIEWS_TIMEOUT_MS}ms (large schema?) — omitted`);
       } else {
         dependentViews = extractDependentViews(result);
+        log(`[definition] dependent views for ${schema}.${name} fetched in ${Date.now() - startedAt}ms (${dependentViews.length} view(s))`);
       }
     } catch (err) {
       log(`[definition] dependent-views lookup for ${schema}.${name} failed (non-fatal): ${describeError(err)}`);
     }
-    contentByUri.set(uri.toString(), rerender(dependentViews));
-    contentProvider.announceChange(uri);
+    onUpdate(dependentViews);
+  })();
+}
+
+function scheduleTableLiveUpdates(
+  connectionIdPromise: Promise<string | undefined>,
+  table: TableInfo,
+  uri: vscode.Uri
+): void {
+  const startedAt = Date.now();
+  (async () => {
+    const connectionId = await connectionIdPromise;
+    if (!connectionId) return;
+
+    let fastExtras: Omit<TableExtras, 'dependentViews'> | undefined;
+    let dependentViewsState: DependentViewsState = 'loading';
+    const render = (): void => {
+      if (!fastExtras) return;
+      updateOpenDefinition(uri, formatTableDefinition(table, { ...fastExtras, dependentViews: dependentViewsState }).text);
+    };
+
+    scheduleDependentViewsUpdate(connectionId, table.schema, table.name, (dependentViews) => {
+      dependentViewsState = dependentViews;
+      render();
+    });
+
+    fastExtras = await fetchFastExtras(connectionId, table.objectId);
+    if (!fastExtras) return;
+
+    render();
+    log(`[definition] live table extras for ${table.schema}.${table.name} fetched in ${Date.now() - startedAt}ms`);
+  })();
+}
+
+function scheduleViewDefinitionUpdate(
+  connectionIdPromise: Promise<string | undefined>,
+  view: ViewInfo,
+  uri: vscode.Uri
+): void {
+  const startedAt = Date.now();
+  (async () => {
+    const connectionId = await connectionIdPromise;
+    if (!connectionId) return;
+
+    let body: string | null | undefined;
+    let liveExtras = EMPTY_LIVE_EXTRAS;
+    let dependentViewsState: DependentViewsState = 'loading';
+    const render = (): void => {
+      if (body === undefined) return;
+      updateOpenDefinition(uri, formatViewDefinition(view, body, { ...liveExtras, dependentViews: dependentViewsState }).text);
+    };
+
+    scheduleDependentViewsUpdate(connectionId, view.schema, view.name, (dependentViews) => {
+      dependentViewsState = dependentViews;
+      render();
+    });
+
+    void (async () => {
+      const nextBody = await fetchObjectBody(connectionId, view.schema, view.name);
+      body = nextBody;
+      render();
+      log(`[definition] live view body for ${view.schema}.${view.name} fetched in ${Date.now() - startedAt}ms`);
+    })();
+
+    void (async () => {
+      const fastExtras = await fetchFastExtras(connectionId, view.objectId);
+      if (!fastExtras) return;
+
+      liveExtras = fastExtras;
+      render();
+      log(`[definition] live view extras for ${view.schema}.${view.name} fetched in ${Date.now() - startedAt}ms`);
+    })();
   })();
 }
 
@@ -163,6 +264,7 @@ async function resolveDefinitionLocation(
   document: vscode.TextDocument,
   position: vscode.Position
 ): Promise<vscode.Location | undefined> {
+  const startedAt = Date.now();
   if (document.languageId !== 'sql') return undefined;
 
   const remembered = getRememberedKeyForDocument(document.uri);
@@ -176,15 +278,11 @@ async function resolveDefinitionLocation(
   const lineText = document.lineAt(wordRange.end.line).text;
   const textUpToWordEnd = lineText.slice(0, wordRange.end.character);
   const index = getSchemaIndex(cache);
-  const resolved = resolveReferenceAtWord(document.getText(), textUpToWordEnd, word, index);
+  const resolved = resolveReferenceAtWord(() => document.getText(), textUpToWordEnd, word, index);
   if (!resolved) return undefined;
 
   const { target } = resolved;
-
-  // Resolved once, up front — see scheduleDependentViewsUpdate's doc comment
-  // for why the background continuation can't re-resolve this itself later.
-  const activeKey = await resolveActiveKey();
-  const connectionId = activeKey?.connectionId;
+  const connectionIdPromise = resolveDefinitionConnectionId(document);
 
   // A fresh URI per invocation (timestamp query string) so content is never
   // stale/conflated between repeated jumps to the same or different objects.
@@ -197,35 +295,42 @@ async function resolveDefinitionLocation(
 
   if (isRoutineKind(target.kind)) {
     const routine = target as RoutineInfo;
+    const connectionId = await connectionIdPromise;
     const body = connectionId ? await fetchObjectBody(connectionId, routine.schema, routine.name) : null;
     content = body ? formatRoutineBody(routine, body) : formatRoutineStub(routine);
   } else if (target.kind === 'view') {
     const view = target as ViewInfo;
-    const body = connectionId ? await fetchObjectBody(connectionId, view.schema, view.name) : null;
-    const fastExtras = connectionId ? await fetchFastExtras(connectionId, view.objectId) : undefined;
-    const formatted = formatViewDefinition(view, body, fastExtras && { ...fastExtras, dependentViews: 'loading' });
-    content = formatted.text;
     if (resolved.kind === 'column') {
-      selectionLine = formatted.columnLines.get(resolved.columnName.toLowerCase());
-    }
-    if (connectionId && fastExtras) {
-      scheduleDependentViewsUpdate(connectionId, view.schema, view.name, uri, (dependentViews) =>
-        formatViewDefinition(view, body, { ...fastExtras, dependentViews }).text
+      const connectionId = await connectionIdPromise;
+      const body = connectionId ? await fetchObjectBody(connectionId, view.schema, view.name) : null;
+      const liveExtras = connectionId ? (await fetchFastExtras(connectionId, view.objectId)) ?? EMPTY_LIVE_EXTRAS : undefined;
+      const formatted = formatViewDefinition(
+        view,
+        body,
+        connectionId ? { ...(liveExtras ?? EMPTY_LIVE_EXTRAS), dependentViews: 'loading' } : undefined
       );
+      content = formatted.text;
+      selectionLine = formatted.columnLines.get(resolved.columnName.toLowerCase());
+      if (connectionId) {
+        scheduleDependentViewsUpdate(connectionId, view.schema, view.name, (dependentViews) => {
+          updateOpenDefinition(uri, formatViewDefinition(view, body, { ...(liveExtras ?? EMPTY_LIVE_EXTRAS), dependentViews }).text);
+        });
+      }
+    } else {
+      const formatted = formatViewDefinition(view, null);
+      content = formatted.text;
+      scheduleViewDefinitionUpdate(connectionIdPromise, view, uri);
+      log(`[definition] opened cached view definition for ${view.schema}.${view.name} in ${Date.now() - startedAt}ms`);
     }
   } else {
     const table = target as TableInfo;
-    const fastExtras = connectionId ? await fetchFastExtras(connectionId, table.objectId) : undefined;
-    const formatted = formatTableDefinition(table, fastExtras && { ...fastExtras, dependentViews: 'loading' });
+    const formatted = formatTableDefinition(table);
     content = formatted.text;
     if (resolved.kind === 'column') {
       selectionLine = formatted.columnLines.get(resolved.columnName.toLowerCase());
     }
-    if (connectionId && fastExtras) {
-      scheduleDependentViewsUpdate(connectionId, table.schema, table.name, uri, (dependentViews) =>
-        formatTableDefinition(table, { ...fastExtras, dependentViews }).text
-      );
-    }
+    scheduleTableLiveUpdates(connectionIdPromise, table, uri);
+    log(`[definition] opened cached table definition for ${table.schema}.${table.name} in ${Date.now() - startedAt}ms`);
   }
 
   contentByUri.set(uri.toString(), content);

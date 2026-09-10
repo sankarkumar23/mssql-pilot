@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { extractForeignKeys, extractIndexes } from '../../cache/schemaQueries';
+import { extractDefinitionExtras, extractForeignKeys, extractIndexes } from '../../cache/schemaQueries';
 import { SimpleExecuteResult } from '../../utils/mssqlTypes';
 
 /** Builds a fake SimpleExecuteResult from column names + row value arrays (null = SQL NULL). */
@@ -52,6 +52,51 @@ suite('schemaQueries.extractForeignKeys', () => {
         { column: 'OrderId', referencedSchema: 'dbo', referencedTable: 'Orders', referencedColumn: 'Id' },
         { column: 'LineNo', referencedSchema: 'dbo', referencedTable: 'Orders', referencedColumn: 'LineNo' },
       ],
+    });
+  });
+
+  suite('schemaQueries.extractDefinitionExtras', () => {
+    test('splits a tagged mixed rowset into indexes, foreign keys, and check constraints', () => {
+      const result = fakeResult(
+        [
+          'row_type', 'index_id', 'index_name', 'is_primary_key', 'is_unique_constraint', 'is_unique', 'is_disabled',
+          'column_name', 'is_descending_key', 'is_included_column',
+          'fk_name', 'parent_column', 'referenced_schema', 'referenced_table', 'referenced_column',
+          'check_name', 'check_definition', 'check_is_disabled',
+        ],
+        [
+          ['index', '1', 'PK_Orders', '1', '0', '1', '0', 'CustomerId', '0', '0', null, null, null, null, null, null, null, null],
+          ['index', '1', 'PK_Orders', '1', '0', '1', '0', 'OrderDate', '1', '0', null, null, null, null, null, null, null, null],
+          ['foreign_key', null, null, null, null, null, null, null, null, null, 'FK_OrderLines_Orders', 'OrderId', 'dbo', 'Orders', 'Id', null, null, null],
+          ['foreign_key', null, null, null, null, null, null, null, null, null, 'FK_OrderLines_Orders', 'LineNo', 'dbo', 'Orders', 'LineNo', null, null, null],
+          ['check_constraint', null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'CK_Orders_Name', '([Name] IS NOT NULL)', '0'],
+        ]
+      );
+
+      const extras = extractDefinitionExtras(result);
+      assert.deepStrictEqual(extras.indexes, [{
+        name: 'PK_Orders',
+        isPrimaryKey: true,
+        isUniqueConstraint: false,
+        isUnique: true,
+        isDisabled: false,
+        columns: [
+          { name: 'CustomerId', isDescending: false },
+          { name: 'OrderDate', isDescending: true },
+        ],
+      }]);
+      assert.deepStrictEqual(extras.foreignKeys, [{
+        name: 'FK_OrderLines_Orders',
+        columns: [
+          { column: 'OrderId', referencedSchema: 'dbo', referencedTable: 'Orders', referencedColumn: 'Id' },
+          { column: 'LineNo', referencedSchema: 'dbo', referencedTable: 'Orders', referencedColumn: 'LineNo' },
+        ],
+      }]);
+      assert.deepStrictEqual(extras.checkConstraints, [{
+        name: 'CK_Orders_Name',
+        definition: '([Name] IS NOT NULL)',
+        isDisabled: false,
+      }]);
     });
   });
 });
