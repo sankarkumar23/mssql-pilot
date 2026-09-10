@@ -8,12 +8,18 @@ export interface FormattedDefinition {
   columnLines: Map<string, number>;
 }
 
-/** Live-fetched, on-demand only — never part of the bulk cache (see schemaQueries.ts). */
+/**
+ * Live-fetched, on-demand only — never part of the bulk cache (see
+ * schemaQueries.ts). `dependentViews` is fetched separately from the rest
+ * (see definitionProvider.ts) since it's the one query slow enough on huge
+ * schemas to be worth not blocking on — 'loading' renders a placeholder that
+ * a later content update replaces once the real fetch resolves.
+ */
 export interface TableExtras {
   indexes: IndexInfo[];
   foreignKeys: ForeignKeyInfo[];
   checkConstraints: CheckConstraintInfo[];
-  dependentViews: DependentViewInfo[];
+  dependentViews: DependentViewInfo[] | 'loading';
 }
 
 function qualifiedName(schema: string, name: string): string {
@@ -81,7 +87,10 @@ function formatExtrasSection(schema: string, name: string, extras: TableExtras):
     const disabled = chk.isDisabled ? ' -- disabled' : '';
     lines.push(`ALTER TABLE ${qName} ADD CONSTRAINT ${quoteIdentifierIfNeeded(chk.name)} CHECK (${chk.definition ?? ''});${disabled}`);
   }
-  if (extras.dependentViews.length > 0) {
+  if (extras.dependentViews === 'loading') {
+    lines.push('');
+    lines.push('-- Checking for dependent views…');
+  } else if (extras.dependentViews.length > 0) {
     lines.push('');
     lines.push(`-- Views depending on ${qName}:`);
     for (const view of extras.dependentViews) {

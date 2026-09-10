@@ -77,6 +77,12 @@ suite('definitionContent.formatTableDefinition', () => {
     assert.doesNotMatch(text, /Views depending on/);
   });
 
+  test('with dependentViews still "loading", shows a placeholder instead of waiting or omitting it silently', () => {
+    const { text } = formatTableDefinition(ordersTable, { indexes: [], foreignKeys: [], checkConstraints: [], dependentViews: 'loading' });
+    assert.match(text, /Checking for dependent views…/);
+    assert.doesNotMatch(text, /Views depending on/);
+  });
+
   test('a schema/table/column name needing quoting is bracket-quoted in the rendered SQL', () => {
     const spacedTable: TableInfo = {
       kind: 'table', objectId: 3, schema: 'My Schema', name: 'My Table', modifyDate: 'x',
