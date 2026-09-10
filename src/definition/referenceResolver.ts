@@ -17,6 +17,10 @@ export type ResolvedReference =
  * mid-typed) parses identically to a completion request typed up to that
  * same point, with zero new parsing code.
  *
+ * `getDocumentText` is a lazy getter, not a pre-read string: most object
+ * references in a FROM/JOIN clause can be resolved without scanning the
+ * whole document for aliases, which matters on very large SQL scripts.
+ *
  * `textUpToWordEnd` is the current line's text truncated right after the
  * hovered word. `word` is that word itself. Deliberately no cursorOffset is
  * passed to buildAliasMap — its "exclude an alias still being typed" logic
@@ -25,7 +29,7 @@ export type ResolvedReference =
  * the cursor happens to sit at the tail end of, which must still resolve.
  */
 export function resolveReferenceAtWord(
-  documentText: string,
+  getDocumentText: () => string,
   textUpToWordEnd: string,
   word: string,
   index: SchemaIndex
@@ -33,11 +37,26 @@ export function resolveReferenceAtWord(
   if (!word) return undefined;
 
   const ctx = getCompletionContext(textUpToWordEnd);
-  const aliasMap = buildAliasMap(documentText);
+
+  // "FROM dbo.Orders" / "JOIN Orders" — the word under the cursor is the
+  // object being declared, not an alias use, so there's nothing to gain from
+  // a full-document alias scan.
+  if (ctx.isTableReferencePosition) {
+    const target = resolveByBareName(index, ctx.qualifier ? `${ctx.qualifier}.${word}` : word);
+    return target ? { kind: 'object', target } : undefined;
+  }
+
+  let aliasMap: Map<string, string> | undefined;
+  const getAliasMap = (): Map<string, string> => {
+    if (!aliasMap) {
+      aliasMap = buildAliasMap(getDocumentText());
+    }
+    return aliasMap;
+  };
 
   if (ctx.qualifier) {
     // "alias.word" — a table alias already in scope, so "word" names a column.
-    const aliasedTableName = aliasMap.get(ctx.qualifier.toLowerCase());
+    const aliasedTableName = getAliasMap().get(ctx.qualifier.toLowerCase());
     if (aliasedTableName) {
       const target = resolveByBareName(index, aliasedTableName);
       if (target) return { kind: 'column', target, columnName: word };
@@ -50,7 +69,7 @@ export function resolveReferenceAtWord(
 
   // Bare word: either a table alias on its own (jump to the whole table),
   // or a schema-less table/view/routine reference.
-  const aliasedTableName = aliasMap.get(word.toLowerCase());
+  const aliasedTableName = getAliasMap().get(word.toLowerCase());
   if (aliasedTableName) {
     const target = resolveByBareName(index, aliasedTableName);
     if (target) return { kind: 'object', target };

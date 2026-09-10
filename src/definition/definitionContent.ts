@@ -8,6 +8,8 @@ export interface FormattedDefinition {
   columnLines: Map<string, number>;
 }
 
+export type DependentViewsState = DependentViewInfo[] | 'loading' | 'unavailable';
+
 /**
  * Live-fetched, on-demand only — never part of the bulk cache (see
  * schemaQueries.ts). `dependentViews` is fetched separately from the rest
@@ -19,7 +21,7 @@ export interface TableExtras {
   indexes: IndexInfo[];
   foreignKeys: ForeignKeyInfo[];
   checkConstraints: CheckConstraintInfo[];
-  dependentViews: DependentViewInfo[] | 'loading';
+  dependentViews: DependentViewsState;
 }
 
 function qualifiedName(schema: string, name: string): string {
@@ -90,12 +92,18 @@ function formatExtrasSection(schema: string, name: string, extras: TableExtras):
   if (extras.dependentViews === 'loading') {
     lines.push('');
     lines.push('-- Checking for dependent views…');
+  } else if (extras.dependentViews === 'unavailable') {
+    lines.push('');
+    lines.push('-- Dependent views unavailable (lookup failed or timed out).');
   } else if (extras.dependentViews.length > 0) {
     lines.push('');
     lines.push(`-- Views depending on ${qName}:`);
     for (const view of extras.dependentViews) {
       lines.push(`--   ${qualifiedName(view.schema, view.name)}`);
     }
+  } else {
+    lines.push('');
+    lines.push(`-- No dependent views found for ${qName}.`);
   }
   return lines;
 }

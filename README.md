@@ -18,7 +18,8 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 
 Press **F12** (or **Alt+F1**, or right-click → **Go to Definition**, or **Alt+F12** to peek) on a table/view name, an `alias.Column` reference, or a procedure/function call, and Pilot opens a read-only definition for it — instantly, from the same schema cache that powers autocomplete:
 
-- **Tables/views** — a `CREATE TABLE`-shaped column listing (types, nullability, identity, defaults), plus indexes, the primary key, foreign keys, and check constraints — fetched live from the connected database at the moment you jump (not part of the bulk cache, so it doesn't slow down syncing). Jumping via `alias.Column` lands directly on that column's line. Without a live connection, it falls back to the cached column list alone.
+- **Tables** — the cached column layout opens immediately from Pilot's in-memory schema cache; indexes, the primary key, foreign keys, check constraints, and dependent views are filled in afterward from the live database once available. Jumping via `alias.Column` lands directly on that column's line. Without a live connection, it stays on the cached column list alone.
+- **Views** — jumping on the view name opens cached columns immediately, then patches in the live view body, indexes, the primary key, foreign keys, check constraints, and dependent views afterward from the connected database. Jumping on a specific view column still waits for the live body so the cursor can land on the right line.
 - **Procedures/functions** — the real body text, fetched live over your existing connection. Falls back to a parameter-list-only signature if there's no connection or the fetch fails (e.g. an encrypted or CLR object).
 
 F12 and Alt+F1 both trigger the same resolution — use whichever you prefer. Since mssql's own IntelliSense also registers a (often unreliable) definition provider for SQL files, and VS Code merges results from every provider on F12, you may occasionally see a two-item picker instead of jumping straight there if mssql's provider also returns something for the same reference; **Alt+F1 always goes straight to Pilot's own result.**
@@ -64,7 +65,7 @@ npm test
 npm run package
 npm install -g @vscode/vsce
 vsce package --no-dependencies
-code --install-extension mssql-pilot-1.0.0.vsix --force
+code --install-extension mssql-pilot-1.1.2.vsix --force
 ```
 
 ## Requirements

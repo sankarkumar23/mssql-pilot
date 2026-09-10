@@ -12,6 +12,8 @@ import { ServerDatabaseKey } from './cacheKey';
  * provider is later asked about it while some other document is active.
  */
 const keyByDocumentUri = new Map<string, ServerDatabaseKey>();
+/** Best-effort remembered active connection id for the same document. */
+const connectionIdByDocumentUri = new Map<string, string>();
 
 export function rememberKeyForDocument(uri: vscode.Uri, key: ServerDatabaseKey): void {
   keyByDocumentUri.set(uri.toString(), key);
@@ -21,10 +23,21 @@ export function getRememberedKeyForDocument(uri: vscode.Uri): ServerDatabaseKey 
   return keyByDocumentUri.get(uri.toString());
 }
 
+export function rememberConnectionIdForDocument(uri: vscode.Uri, connectionId: string): void {
+  connectionIdByDocumentUri.set(uri.toString(), connectionId);
+}
+
+export function getRememberedConnectionIdForDocument(uri: vscode.Uri): string | undefined {
+  return connectionIdByDocumentUri.get(uri.toString());
+}
+
 export function forgetDocument(uri: vscode.Uri): void {
-  keyByDocumentUri.delete(uri.toString());
+  const uriStr = uri.toString();
+  keyByDocumentUri.delete(uriStr);
+  connectionIdByDocumentUri.delete(uriStr);
 }
 
 export function clearAllRememberedKeys(): void {
   keyByDocumentUri.clear();
+  connectionIdByDocumentUri.clear();
 }

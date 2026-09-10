@@ -63,10 +63,23 @@ function resolveAt(text: string, word: string, cache: DatabaseSchemaCache) {
   const index = getSchemaIndex(cache);
   const end = text.lastIndexOf(word) + word.length;
   assert.ok(end >= word.length, `"${word}" not found in "${text}"`);
-  return resolveReferenceAtWord(text, text.slice(0, end), word, index);
+  return resolveReferenceAtWord(() => text, text.slice(0, end), word, index);
 }
 
 suite('referenceResolver.resolveReferenceAtWord', () => {
+  test('table references in FROM/JOIN resolve without scanning the whole document for aliases', () => {
+    const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
+    const index = getSchemaIndex(cache);
+    const result = resolveReferenceAtWord(
+      () => { throw new Error('should not need document text for FROM/JOIN object references'); },
+      'SELECT * FROM sales.Orders',
+      'Orders',
+      index
+    );
+    assert.strictEqual(result?.kind, 'object');
+    assert.strictEqual(result?.target.schema, 'sales');
+  });
+
   test('schema-qualified table name in FROM resolves to that exact schema\'s table, even when the same name exists elsewhere', () => {
     const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
     const result = resolveAt('SELECT * FROM sales.Orders', 'Orders', cache);
