@@ -187,6 +187,12 @@ function scheduleTableLiveUpdates(
     const connectionId = await connectionIdPromise;
     if (!connectionId) return;
 
+    // Mutated below by the awaited fetchFastExtras assignment; render()
+    // (defined before that assignment) must see the current value whenever
+    // either fetch's callback fires. Kept as two independent fetches on
+    // purpose, not sequenced, so the dependent-views lookup and the fast
+    // extras run concurrently.
+    // eslint-disable-next-line prefer-const
     let fastExtras: Omit<TableExtras, 'dependentViews'> | undefined;
     let dependentViewsState: DependentViewsState = 'loading';
     const render = (): void => {
