@@ -14,8 +14,18 @@ MSSQL Pilot queries your schema itself (cheap `sys.*` catalog views — tables, 
 - **Background delta sync** — after the initial load, a lightweight sync catches up on anything that changed (including renames and deletions) without blocking your work.
 - **Never blocks a query** — the completion provider never waits on a network call, not even on a cache miss.
 
+## Go to Definition
+
+Press **F12** (or **Alt+F1**, or right-click → **Go to Definition**, or **Alt+F12** to peek) on a table/view name, an `alias.Column` reference, or a procedure/function call, and Pilot opens a read-only definition for it — instantly, from the same schema cache that powers autocomplete:
+
+- **Tables/views** — a `CREATE TABLE`-shaped column listing (types, nullability, identity, defaults), plus indexes, the primary key, foreign keys, and check constraints — fetched live from the connected database at the moment you jump (not part of the bulk cache, so it doesn't slow down syncing). Jumping via `alias.Column` lands directly on that column's line. Without a live connection, it falls back to the cached column list alone.
+- **Procedures/functions** — the real body text, fetched live over your existing connection. Falls back to a parameter-list-only signature if there's no connection or the fetch fails (e.g. an encrypted or CLR object).
+
+F12 and Alt+F1 both trigger the same resolution — use whichever you prefer. Since mssql's own IntelliSense also registers a (often unreliable) definition provider for SQL files, and VS Code merges results from every provider on F12, you may occasionally see a two-item picker instead of jumping straight there if mssql's provider also returns something for the same reference; **Alt+F1 always goes straight to Pilot's own result.**
+
 ## Commands
 
+- `MSSQL Pilot: Go to Definition`
 - `MSSQL Pilot: Resync Schema Cache (Current Database)`
 - `MSSQL Pilot: Resync Schema Cache (All Cached Databases)`
 - `MSSQL Pilot: Clear Schema Cache (Current Database)`

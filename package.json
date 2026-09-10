@@ -2,7 +2,7 @@
   "name": "mssql-pilot",
   "displayName": "MSSQL Pilot",
   "description": "Fast, persistent schema autocomplete for the mssql extension — instant IntelliSense for databases with thousands of tables, views, and stored procedures, even right after reconnecting.",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "publisher": "sankarkumar23",
   "repository": {
     "type": "git",
@@ -61,6 +61,18 @@
         "command": "mssql-pilot.showCacheStatus",
         "title": "Show Schema Cache Status",
         "category": "MSSQL Pilot"
+      },
+      {
+        "command": "mssql-pilot.goToDefinition",
+        "title": "Go to Definition",
+        "category": "MSSQL Pilot"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "mssql-pilot.goToDefinition",
+        "key": "alt+F1",
+        "when": "editorTextFocus && editorLangId == sql"
       }
     ],
     "configuration": {

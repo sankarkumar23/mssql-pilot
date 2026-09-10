@@ -129,9 +129,11 @@ const vscodeStub: any = {
   TextEdit,
   Disposable,
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+  StatusBarAlignment: { Left: 1, Right: 2 },
   window: {
     activeTextEditor: undefined,
     visibleTextEditors: [] as unknown[],
+    _lastStatusBarItem: undefined as unknown,
     createOutputChannel: (_name: string) => ({
       appendLine: () => {},
       append: () => {},
@@ -139,6 +141,18 @@ const vscodeStub: any = {
       clear: () => {},
       dispose: () => {},
     }),
+    createStatusBarItem: (..._args: unknown[]) => {
+      const item = {
+        text: '',
+        tooltip: '',
+        shown: false,
+        show(this: { shown: boolean }) { this.shown = true; },
+        hide(this: { shown: boolean }) { this.shown = false; },
+        dispose() {},
+      };
+      vscodeStub.window._lastStatusBarItem = item;
+      return item;
+    },
     showInformationMessage: async (..._args: unknown[]) => undefined,
     showWarningMessage: async (..._args: unknown[]) => undefined,
     showErrorMessage: async (..._args: unknown[]) => undefined,

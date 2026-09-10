@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { DatabaseSchemaCache, SchemaObject, ColumnInfo, RoutineInfo } from '../cache/schemaTypes';
 import { getSchemaIndex, SchemaIndex } from '../cache/schemaIndex';
+import { resolveByBareName } from '../cache/tableResolver';
 import { buildAliasMap, collectAliasedTableReferences, collectUsedAliases, getCompletionContext } from './contextParser';
 import { suggestAlias } from './aliasSuggester';
 import { shouldAddNewLineAfterTableAlias } from '../utils/config';
+import { quoteIdentifierIfNeeded } from '../utils/sqlIdentifier';
 
 /** Kinds that make sense as a `FROM`/`JOIN` source, and so can sensibly carry a suggested alias. */
 const ALIASABLE_KINDS = new Set<SchemaObject['kind']>(['table', 'view', 'tableFunction']);
@@ -32,16 +34,6 @@ function kindToVscodeKind(kind: SchemaObject['kind']): vscode.CompletionItemKind
   }
 }
 
-const VALID_UNQUOTED_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * Bracket-quotes an identifier only when it actually needs it (spaces,
- * leading digit, special characters, ...) — labels stay plain/readable,
- * but inserted text must always be syntactically valid SQL on its own.
- */
-function quoteIdentifierIfNeeded(name: string): string {
-  return VALID_UNQUOTED_IDENTIFIER.test(name) ? name : `[${name.replace(/\]/g, ']]')}]`;
-}
 
 function docForColumn(col: ColumnInfo): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
@@ -69,10 +61,9 @@ function docForRoutine(routine: RoutineInfo): vscode.MarkdownString {
   return md;
 }
 
-function detailForColumn(col: ColumnInfo): string {
-  const extras = [col.isIdentity ? 'IDENTITY' : null, col.isPrimaryKey ? 'PK' : null].filter(Boolean).join(', ');
-  const nullability = col.isNullable ? 'NULL' : 'NOT NULL';
-  return `MSSQL Pilot · column (${col.dataType}, ${nullability}${extras ? ', ' + extras : ''})`;
+/** Bare label only — type/nullability/identity/PK/default all live in docForColumn's expanded panel instead. */
+function detailForColumn(): string {
+  return 'MSSQL Pilot · column';
 }
 
 /**
@@ -109,7 +100,7 @@ function buildObjectItem(obj: SchemaObject, aliasSuggestion?: string): vscode.Co
 function buildColumnItem(col: ColumnInfo): vscode.CompletionItem {
   const item = new vscode.CompletionItem(col.name, vscode.CompletionItemKind.Field);
   item.insertText = quoteIdentifierIfNeeded(col.name);
-  item.detail = detailForColumn(col);
+  item.detail = detailForColumn();
   item.documentation = docForColumn(col);
   return item;
 }
@@ -118,7 +109,7 @@ function buildColumnItem(col: ColumnInfo): vscode.CompletionItem {
 function buildAliasColumnItem(alias: string, col: ColumnInfo): vscode.CompletionItem {
   const item = new vscode.CompletionItem(`${alias}.${col.name}`, vscode.CompletionItemKind.Field);
   item.insertText = `${quoteIdentifierIfNeeded(alias)}.${quoteIdentifierIfNeeded(col.name)}`;
-  item.detail = detailForColumn(col);
+  item.detail = detailForColumn();
   item.documentation = docForColumn(col);
   return item;
 }
@@ -134,36 +125,6 @@ function buildSchemaItem(schema: string): vscode.CompletionItem {
 function columnsOf(obj: SchemaObject): ColumnInfo[] {
   if (obj.kind === 'table' || obj.kind === 'view') return obj.columns;
   return obj.tableColumns ?? [];
-}
-
-const DEFAULT_SCHEMA = 'dbo';
-
-/**
- * Resolves a FROM/JOIN table reference (as written — possibly schema-qualified)
- * to its cached SchemaObject. When the reference names an explicit schema,
- * that schema is honored exactly — it never falls back to a same-named table
- * in a different schema, which would silently resolve to the wrong columns.
- *
- * A schema-less reference is genuinely ambiguous when the same name exists in
- * more than one schema — SQL Server itself resolves it via the connection's
- * default schema, which is "dbo" for the overwhelming majority of logins, so
- * a "dbo" candidate is preferred when there is one. This is a heuristic, not
- * a guarantee: a login with a non-dbo default schema can still see the wrong
- * table suggested here.
- */
-function resolveByBareName(index: SchemaIndex, tableName: string): SchemaObject | undefined {
-  const segments = tableName.split('.');
-  const bareName = segments.pop()?.toLowerCase();
-  if (!bareName) return undefined;
-  const candidates = index.byName.get(bareName);
-  if (!candidates) return undefined;
-
-  const schema = segments.pop()?.toLowerCase();
-  if (schema) {
-    return candidates.find((c) => c.schema.toLowerCase() === schema);
-  }
-
-  return candidates.find((c) => c.schema.toLowerCase() === DEFAULT_SCHEMA) ?? candidates[0];
 }
 
 /**

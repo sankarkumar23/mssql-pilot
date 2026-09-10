@@ -276,6 +276,37 @@ suite('itemBuilder.buildCompletionItems', () => {
     assert.deepStrictEqual(labels, ['Id', 'Total']);
   });
 
+  test('a column\'s detail is a bare label — type/nullability/identity/PK live only in the documentation panel, not duplicated', () => {
+    const cache = buildCache({ 1: ordersTable });
+    const text = 'SELECT o. FROM dbo.Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const idColumn = items.find((i) => i.label === 'Id')!;
+    assert.strictEqual(idColumn.detail, 'MSSQL Pilot · column');
+    const doc$ = idColumn.documentation as vscode.MarkdownString;
+    assert.match(doc$.value, /Type: `int`/);
+    assert.match(doc$.value, /Nullable: no/);
+    assert.match(doc$.value, /Identity column/);
+    assert.match(doc$.value, /Primary key/);
+  });
+
+  test('a column with a default shows it in the documentation panel', () => {
+    const withDefault: TableInfo = {
+      ...ordersTable,
+      objectId: 10,
+      columns: [{ ...ordersTable.columns[1], defaultDefinition: '((0))' }],
+    };
+    const cache = buildCache({ 10: withDefault });
+    const text = 'SELECT o. FROM dbo.Orders AS o';
+    const lineText = 'SELECT o.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    const totalColumn = items.find((i) => i.label === 'Total')!;
+    const doc$ = totalColumn.documentation as vscode.MarkdownString;
+    assert.match(doc$.value, /Default: `\(\(0\)\)`/);
+  });
+
   test('alias qualifier honors the explicit schema when the same table name exists in another schema', () => {
     const cache = buildCache({ 1: ordersTable, 8: salesOrdersTable });
     const text = 'SELECT o. FROM sales.Orders AS o';

@@ -9,6 +9,8 @@ import { registerKeywordCasingProvider } from './completion/keywordCasingProvide
 import { resyncCurrentDatabase, resyncAll } from './commands/resync';
 import { clearCacheCurrentDatabase, clearCacheAll } from './commands/clearCache';
 import { showCacheStatus } from './commands/showCacheStatus';
+import { registerDefinitionFeature } from './definition/definitionProvider';
+import { disposeStatusBar } from './utils/statusBar';
 
 export function activate(context: vscode.ExtensionContext): void {
   log('MSSQL Pilot activated');
@@ -25,6 +27,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(registerSyncTriggers(context));
   context.subscriptions.push(registerCompletionProvider(context));
   context.subscriptions.push(registerKeywordCasingProvider());
+  context.subscriptions.push(registerDefinitionFeature());
+  context.subscriptions.push({ dispose: disposeStatusBar });
 
   context.subscriptions.push(
     vscode.commands.registerCommand('mssql-pilot.resyncCurrentDatabase', () => resyncCurrentDatabase(context)),

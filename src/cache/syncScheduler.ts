@@ -12,6 +12,7 @@ import { emptyDatabaseSchemaCache } from './schemaTypes';
 import { runSync } from './syncEngine';
 import { isConsentGranted, requestConsent } from './consentManager';
 import { SERVER_NAME_QUERY, extractServerName } from './schemaQueries';
+import { startBuildingStatus, stopBuildingStatus } from '../utils/statusBar';
 
 export const EXTENSION_ID = 'mssql-pilot';
 
@@ -74,7 +75,16 @@ function kickSync(
     }
 
     const current = getMemoryCache(cacheKeyStr) ?? emptyDatabaseSchemaCache(key.server, key.database);
-    const next = await runSync(api.connectionSharing, EXTENSION_ID, connectionId, current);
+    // A delta sync is fast enough not to need this; only the very first full
+    // sync for a database (empty cache so far) is worth surfacing.
+    const isFirstSync = current.lastFullSyncAt === '';
+    let next;
+    try {
+      if (isFirstSync) startBuildingStatus(cacheKeyStr, `${key.server}/${key.database}`);
+      next = await runSync(api.connectionSharing, EXTENSION_ID, connectionId, current);
+    } finally {
+      if (isFirstSync) stopBuildingStatus(cacheKeyStr);
+    }
     if (!next) return; // failed — already logged inside runSync, cache left as-is
 
     setMemoryCache(cacheKeyStr, next);

@@ -189,6 +189,170 @@ export function extractServerName(result: SimpleExecuteResult): string {
   return result.rows?.[0]?.[0]?.displayValue ?? '';
 }
 
+/** Escapes a value for embedding in a T-SQL N'...' string literal. */
+function escapeSqlLiteral(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+/**
+ * Fetches a routine's body text live (not part of bulk sync — routine bodies
+ * are never cached, deliberately, to keep the cache lean). Only used
+ * on-demand, one object at a time, when the user asks to see a specific
+ * routine's definition.
+ */
+export function buildObjectDefinitionQuery(schema: string, name: string): string {
+  return `SELECT OBJECT_DEFINITION(OBJECT_ID(N'${escapeSqlLiteral(schema)}.${escapeSqlLiteral(name)}')) AS object_definition;`;
+}
+
+export interface DependentViewInfo {
+  schema: string;
+  name: string;
+}
+
+/**
+ * Views that reference this table/view, via SQL Server's own dependency
+ * tracking (sys.dm_sql_referencing_entities) — not a text search, so it
+ * catches references regardless of formatting/casing. Like the other
+ * on-demand fetches here, only ever run one object at a time at F12 time.
+ */
+export function buildDependentViewsQuery(schema: string, name: string): string {
+  return `
+SELECT DISTINCT s.name AS view_schema, o.name AS view_name
+FROM sys.dm_sql_referencing_entities(N'${escapeSqlLiteral(schema)}.${escapeSqlLiteral(name)}', 'OBJECT') AS d
+JOIN sys.objects AS o ON o.object_id = d.referencing_id
+JOIN sys.schemas AS s ON s.schema_id = o.schema_id
+WHERE o.type = 'V'
+ORDER BY s.name, o.name;`;
+}
+
+export function extractDependentViews(result: SimpleExecuteResult): DependentViewInfo[] {
+  return rowsToObjects(result).map((r) => ({
+    schema: r.view_schema ?? '',
+    name: r.view_name ?? '',
+  }));
+}
+
+/** Null when the object doesn't exist, is encrypted (WITH ENCRYPTION), or is a CLR object. */
+export function extractObjectDefinition(result: SimpleExecuteResult): string | null {
+  const cell = result.rows?.[0]?.[0];
+  if (!cell || cell.isNull) return null;
+  return cell.displayValue;
+}
+
+export interface IndexInfo {
+  name: string;
+  isPrimaryKey: boolean;
+  isUniqueConstraint: boolean;
+  isUnique: boolean;
+  isDisabled: boolean;
+  columns: Array<{ name: string; isDescending: boolean }>;
+}
+
+export interface ForeignKeyInfo {
+  name: string;
+  columns: Array<{ column: string; referencedSchema: string; referencedTable: string; referencedColumn: string }>;
+}
+
+export interface CheckConstraintInfo {
+  name: string;
+  definition: string | null;
+  isDisabled: boolean;
+}
+
+/**
+ * Indexes, PK, and unique constraints all live in sys.indexes — one query
+ * covers all three. Like the routine-body fetch above, this is on-demand
+ * only (go-to-definition on a specific table), never part of bulk sync:
+ * a huge database can have far more index/key metadata than object
+ * metadata, and none of it is needed for autocomplete.
+ */
+export function buildIndexesQuery(objectId: number): string {
+  return `
+SELECT i.index_id, i.name AS index_name, i.is_primary_key, i.is_unique_constraint, i.is_unique, i.is_disabled,
+       c.name AS column_name, ic.key_ordinal, ic.is_descending_key, ic.is_included_column
+FROM sys.indexes i
+JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+WHERE i.object_id = ${objectId} AND i.index_id > 0
+ORDER BY i.index_id, ic.key_ordinal, ic.index_column_id;`;
+}
+
+export function extractIndexes(result: SimpleExecuteResult): IndexInfo[] {
+  const byId = new Map<string, IndexInfo>();
+  const order: string[] = [];
+  for (const r of rowsToObjects(result)) {
+    const id = r.index_id ?? '';
+    let info = byId.get(id);
+    if (!info) {
+      info = {
+        name: r.index_name ?? '',
+        isPrimaryKey: toBool(r.is_primary_key),
+        isUniqueConstraint: toBool(r.is_unique_constraint),
+        isUnique: toBool(r.is_unique),
+        isDisabled: toBool(r.is_disabled),
+        columns: [],
+      };
+      byId.set(id, info);
+      order.push(id);
+    }
+    if (!toBool(r.is_included_column)) {
+      info.columns.push({ name: r.column_name ?? '', isDescending: toBool(r.is_descending_key) });
+    }
+  }
+  return order.map((id) => byId.get(id)!);
+}
+
+export function buildForeignKeysQuery(objectId: number): string {
+  return `
+SELECT fk.name AS fk_name, pc.name AS parent_column,
+       rs.name AS referenced_schema, rt.name AS referenced_table, rc.name AS referenced_column
+FROM sys.foreign_keys fk
+JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
+JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
+JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+WHERE fk.parent_object_id = ${objectId}
+ORDER BY fk.name, fkc.constraint_column_id;`;
+}
+
+export function extractForeignKeys(result: SimpleExecuteResult): ForeignKeyInfo[] {
+  const byName = new Map<string, ForeignKeyInfo>();
+  const order: string[] = [];
+  for (const r of rowsToObjects(result)) {
+    const name = r.fk_name ?? '';
+    let info = byName.get(name);
+    if (!info) {
+      info = { name, columns: [] };
+      byName.set(name, info);
+      order.push(name);
+    }
+    info.columns.push({
+      column: r.parent_column ?? '',
+      referencedSchema: r.referenced_schema ?? '',
+      referencedTable: r.referenced_table ?? '',
+      referencedColumn: r.referenced_column ?? '',
+    });
+  }
+  return order.map((name) => byName.get(name)!);
+}
+
+export function buildCheckConstraintsQuery(objectId: number): string {
+  return `
+SELECT cc.name, cc.definition, cc.is_disabled
+FROM sys.check_constraints cc
+WHERE cc.parent_object_id = ${objectId}
+ORDER BY cc.name;`;
+}
+
+export function extractCheckConstraints(result: SimpleExecuteResult): CheckConstraintInfo[] {
+  return rowsToObjects(result).map((r) => ({
+    name: r.name ?? '',
+    definition: r.definition,
+    isDisabled: toBool(r.is_disabled),
+  }));
+}
+
 export function mapSchemaListingRows(result: SimpleExecuteResult): string[] {
   return rowsToObjects(result).map((r) => r.schema_name ?? '').filter((name) => name.length > 0);
 }
