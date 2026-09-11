@@ -5,6 +5,7 @@ import { isFeatureEnabled } from './utils/config';
 import { ensureMssqlErrorCheckingDisabled, ensureMssqlSuggestionsDisabled } from './utils/mssqlSettings';
 import { registerSyncTriggers } from './cache/syncScheduler';
 import { registerCompletionProvider } from './completion/completionProvider';
+import { registerGeneratedAliasRewrite } from './completion/generatedAliasRewrite';
 import { registerKeywordCasingProvider } from './completion/keywordCasingProvider';
 import { resyncCurrentDatabase, resyncAll } from './commands/resync';
 import { clearCacheCurrentDatabase, clearCacheAll } from './commands/clearCache';
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(registerSyncTriggers(context));
   context.subscriptions.push(registerCompletionProvider(context));
+  context.subscriptions.push(registerGeneratedAliasRewrite());
   context.subscriptions.push(registerKeywordCasingProvider());
   context.subscriptions.push(registerDefinitionFeature());
   context.subscriptions.push({ dispose: disposeStatusBar });

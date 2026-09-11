@@ -26,6 +26,7 @@ import {
 } from '../cache/schemaQueries';
 import { log, describeError } from '../utils/outputChannel';
 import { TIMED_OUT, withTimeout } from '../utils/withTimeout';
+import { unquoteIdentifierIfNeeded } from '../utils/sqlIdentifier';
 
 /**
  * sys.dm_sql_referencing_entities resolves a full dependency graph rather
@@ -258,6 +259,20 @@ function statusMessage(text: string): void {
   vscode.window.setStatusBarMessage(`MSSQL Pilot: ${text}`, 4000);
 }
 
+function getIdentifierRangeAtPosition(document: vscode.TextDocument, position: vscode.Position): vscode.Range | undefined {
+  const line = document.lineAt(position.line).text;
+  const regex = /\[(?:[^\]]|\]\])+\]|[A-Za-z_][A-Za-z0-9_]*/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(line)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position.character >= start && position.character <= end) {
+      return new vscode.Range(position.line, start, position.line, end);
+    }
+  }
+  return undefined;
+}
+
 /**
  * Everything through "figure out what's under the cursor and build the
  * virtual document for it" — shared by both the F12/Peek DefinitionProvider
@@ -277,10 +292,10 @@ async function resolveDefinitionLocation(
   const cache = remembered ? getMemoryCache(buildCacheKey(remembered)) : undefined;
   if (!cache) return undefined;
 
-  const wordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+  const wordRange = getIdentifierRangeAtPosition(document, position);
   if (!wordRange) return undefined;
 
-  const word = document.getText(wordRange);
+  const word = unquoteIdentifierIfNeeded(document.getText(wordRange));
   const lineText = document.lineAt(wordRange.end.line).text;
   const textUpToWordEnd = lineText.slice(0, wordRange.end.character);
   const index = getSchemaIndex(cache);

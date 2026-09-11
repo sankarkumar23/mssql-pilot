@@ -4,6 +4,7 @@ import { getSchemaIndex, SchemaIndex } from '../cache/schemaIndex';
 import { resolveByBareName } from '../cache/tableResolver';
 import { buildAliasMap, collectAliasedTableReferences, collectUsedAliases, getCompletionContext } from './contextParser';
 import { suggestAlias } from './aliasSuggester';
+import { buildGeneratedAliasTrackingCommand } from './generatedAliasRewrite';
 import { shouldAddNewLineAfterTableAlias } from '../utils/config';
 import { quoteIdentifierIfNeeded } from '../utils/sqlIdentifier';
 
@@ -88,6 +89,7 @@ function buildObjectItem(obj: SchemaObject, aliasSuggestion?: string): vscode.Co
       snippet.appendTabstop(0); // explicit final cursor position — don't rely on the implicit end-of-snippet default
     }
     item.insertText = snippet;
+    item.command = buildGeneratedAliasTrackingCommand(aliasSuggestion);
   } else {
     item.insertText = baseText;
   }

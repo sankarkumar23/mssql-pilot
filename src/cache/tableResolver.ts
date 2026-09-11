@@ -1,5 +1,6 @@
 import { SchemaObject } from './schemaTypes';
 import { SchemaIndex } from './schemaIndex';
+import { splitMultipartIdentifier, unquoteIdentifierIfNeeded } from '../utils/sqlIdentifier';
 
 const DEFAULT_SCHEMA = 'dbo';
 
@@ -21,7 +22,7 @@ const DEFAULT_SCHEMA = 'dbo';
  * so both features resolve schema/name ambiguity identically.
  */
 export function resolveByBareName(index: SchemaIndex, referenceName: string): SchemaObject | undefined {
-  const segments = referenceName.split('.');
+  const segments = splitMultipartIdentifier(referenceName).map(unquoteIdentifierIfNeeded);
   const bareName = segments.pop()?.toLowerCase();
   if (!bareName) return undefined;
   const candidates = index.byName.get(bareName);

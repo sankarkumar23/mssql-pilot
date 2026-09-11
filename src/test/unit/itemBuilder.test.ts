@@ -97,6 +97,34 @@ const salesOrdersTable: TableInfo = {
 // used to prove schema-preference isn't just an accident of insertion/objectId order.
 const dboOrdersHigherId: TableInfo = { ...ordersTable, objectId: 20 };
 
+const specialCharTable: TableInfo = {
+  kind: 'table',
+  objectId: 21,
+  schema: 'S4RAW',
+  name: '/DMBE/TM_DEALHDR',
+  modifyDate: 'x',
+  columns: [
+    {
+      name: '/DMBE/ID', ordinal: 1, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+      isNullable: false, isIdentity: false, isComputed: false, defaultDefinition: null, isPrimaryKey: true,
+    },
+  ],
+};
+
+const dottedNameTable: TableInfo = {
+  kind: 'table',
+  objectId: 22,
+  schema: 'S4RAW',
+  name: 'TM.DEALHDR',
+  modifyDate: 'x',
+  columns: [
+    {
+      name: 'DocId', ordinal: 1, dataType: 'int', maxLength: 4, precision: 10, scale: 0,
+      isNullable: false, isIdentity: false, isComputed: false, defaultDefinition: null, isPrimaryKey: true,
+    },
+  ],
+};
+
 function positionAtEndOf(lineText: string): vscode.Position {
   return { line: 0, character: lineText.length } as vscode.Position;
 }
@@ -149,6 +177,11 @@ suite('itemBuilder.buildCompletionItems', () => {
     const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
     const snippet = items[0].insertText as unknown as { value: string };
     assert.strictEqual(snippet.value, 'PilotTestTable ${1:ptt}');
+    assert.deepStrictEqual(items[0].command, {
+      command: 'mssql-pilot.trackGeneratedAlias',
+      title: 'Track generated alias',
+      arguments: ['ptt'],
+    });
   });
 
   test('table-reference position: no word boundaries in the name falls back to its first letter', () => {
@@ -334,6 +367,24 @@ suite('itemBuilder.buildCompletionItems', () => {
     const items = buildCompletionItems(cache, doc, positionAtEndOf(text));
     const labels = items.map((i) => i.label).sort();
     assert.deepStrictEqual(labels, ['o.RegionId', 'o.SalesOrderId']);
+  });
+
+  test('alias.column completion works for a bracket-quoted special-character table name', () => {
+    const cache = buildCache({ 21: specialCharTable });
+    const text = 'SELECT t. FROM S4RAW.[/DMBE/TM_DEALHDR] t';
+    const lineText = 'SELECT t.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    assert.deepStrictEqual(items.map((i) => i.label), ['/DMBE/ID']);
+  });
+
+  test('alias.column completion works when the table name contains a dot inside brackets', () => {
+    const cache = buildCache({ 22: dottedNameTable });
+    const text = 'SELECT d. FROM S4RAW.[TM.DEALHDR] d';
+    const lineText = 'SELECT d.';
+    const doc = fakeDocument(text, lineText);
+    const items = buildCompletionItems(cache, doc, positionAtEndOf(lineText));
+    assert.deepStrictEqual(items.map((i) => i.label), ['DocId']);
   });
 
   test('schema-less alias reference prefers the dbo schema when the same table name exists in another schema too', () => {

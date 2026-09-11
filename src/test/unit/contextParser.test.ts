@@ -30,13 +30,24 @@ suite('contextParser.buildAliasMap', () => {
 
   test('bracket-quoted schema and table are both unwrapped', () => {
     const map = buildAliasMap('SELECT * FROM [dbo].[Orders] o');
-    assert.strictEqual(map.get('o'), 'dbo.Orders');
-    assert.strictEqual(map.get('orders'), 'dbo.Orders');
+    assert.strictEqual(map.get('o'), '[dbo].[Orders]');
+    assert.strictEqual(map.get('orders'), '[dbo].[Orders]');
   });
 
   test('one side bracket-quoted, the other bare, is still handled', () => {
-    assert.strictEqual(buildAliasMap('SELECT * FROM [dbo].Orders').get('orders'), 'dbo.Orders');
-    assert.strictEqual(buildAliasMap('SELECT * FROM dbo.[Orders]').get('orders'), 'dbo.Orders');
+    assert.strictEqual(buildAliasMap('SELECT * FROM [dbo].Orders').get('orders'), '[dbo].Orders');
+    assert.strictEqual(buildAliasMap('SELECT * FROM dbo.[Orders]').get('orders'), 'dbo.[Orders]');
+  });
+
+  test('keeps bracket-quoted special-character object names intact in the alias map', () => {
+    const map = buildAliasMap('SELECT * FROM S4RAW.[/DMBE/TM_DEALHDR] t');
+    assert.strictEqual(map.get('/dmbe/tm_dealhdr'), 'S4RAW.[/DMBE/TM_DEALHDR]');
+    assert.strictEqual(map.get('t'), 'S4RAW.[/DMBE/TM_DEALHDR]');
+  });
+
+  test('does not split a bracket-quoted object name on dots inside the identifier', () => {
+    const map = buildAliasMap('SELECT * FROM [My.Schema].[Order.Header] h');
+    assert.strictEqual(map.get('order.header'), '[My.Schema].[Order.Header]');
   });
 });
 
@@ -74,6 +85,18 @@ suite('contextParser.getCompletionContext', () => {
   test('bracket-quoted qualifier containing a space', () => {
     const ctx = getCompletionContext('SELECT * FROM [My Schema].');
     assert.strictEqual(ctx.qualifier, 'My Schema');
+  });
+
+  test('bracket-quoted current identifier with special characters is unwrapped as the word prefix', () => {
+    const ctx = getCompletionContext('SELECT * FROM S4RAW.[/DMBE/TM_DEALHDR]');
+    assert.strictEqual(ctx.qualifier, 'S4RAW');
+    assert.strictEqual(ctx.wordPrefix, '/DMBE/TM_DEALHDR');
+  });
+
+  test('bracket-quoted current identifier containing dots stays one identifier', () => {
+    const ctx = getCompletionContext('SELECT * FROM [My.Schema].[Order.Header]');
+    assert.strictEqual(ctx.qualifier, 'My.Schema');
+    assert.strictEqual(ctx.wordPrefix, 'Order.Header');
   });
 
   test('isTableReferencePosition is true directly after FROM', () => {

@@ -65,7 +65,7 @@ npm test
 npm run package
 npm install -g @vscode/vsce
 vsce package --no-dependencies
-code --install-extension mssql-pilot-1.1.2.vsix --force
+code --install-extension mssql-pilot-1.1.3.vsix --force
 ```
 
 ## Requirements
