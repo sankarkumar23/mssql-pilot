@@ -46,7 +46,6 @@ export function resolveReferenceAtWord(
   // a full-document alias scan.
   if (ctx.isTableReferencePosition) {
     const target = resolveByBareName(index, rawReferenceName);
-    const target = resolveByBareName(index, rawReferenceName);
     return target ? { kind: 'object', target } : undefined;
   }
 
